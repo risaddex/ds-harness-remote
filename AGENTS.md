@@ -167,3 +167,17 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 - 临时验收、评审、地址、日志、构建哈希、采样与调试/验收截图录屏**禁新增提交入库或堆入 `AGENTS.md`/`docs/`**：
   - 复现步骤留测试或 [transport-bench](scripts/transport-bench/README.md)；现场结果放 Issue/PR 附件或已忽略 `artifacts/`、`docs/screenshots/`。
   - README 展示图 `docs/images/` 与应用运行资源保留。
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues of the fork `risaddex/ds-harness-remote` (use `gh --repo risaddex/ds-harness-remote`; never the upstream `liguobao`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`) plus the `wayfinder:*` labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+single-context: one `GLOSSARY.md` at the repo root, ADRs in `docs/adr/`. See `docs/agents/domain.md`.
