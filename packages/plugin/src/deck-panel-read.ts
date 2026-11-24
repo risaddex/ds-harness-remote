@@ -1,12 +1,14 @@
 import {
   DECK_PANEL_READ_CAPABILITY,
   DECK_PANEL_READ_MAX_REPLY_BYTES,
+  DECK_PANEL_READ_OPERATIONS,
   DECK_PANEL_READ_PROBE_TIMEOUT_MS,
   DECK_PANEL_READ_TIMEOUT_MS,
   deckPanelReadParamsSchema,
   type DeckPanelReadFailure,
   type DeckPanelReadHostFailureKind,
   type DeckPanelReadOperation,
+  type DeckPanelReadParams,
   type DeckPanelReadReply,
 } from '@dsh-remote/protocol'
 import type { SafeLogger } from './logging.js'
@@ -19,8 +21,15 @@ import type { SafeLogger } from './logging.js'
 export interface DeckPanelReadServiceLike {
   readonly feature?: unknown
   available(): unknown
-  call(operation: string, params: Record<string, unknown>): unknown
+  call(operation: DeckPanelReadOperation, params: Record<string, unknown>): unknown
 }
+
+/**
+ * The relay's own session authority (the one `workspace.git.*` uses): it answers only for sessions this
+ * authenticated peer may see. Here it is a gate; the workspace it returns is discarded and never reaches
+ * the deck or the phone.
+ */
+export type DeckPanelReadSessionAuthority = (sessionId: string, signal: AbortSignal) => Promise<string | undefined>
 
 export interface DeckPanelReadHostOptions {
   timeoutMs?: number
@@ -33,6 +42,7 @@ const HOST_FAILURE_MESSAGES: Record<DeckPanelReadHostFailureKind, string> = {
   'operation-not-allowed': 'Only the deck tree read and the deck ticket read are available over this channel.',
   'bad-request': 'The request does not have the shape this read takes.',
   unavailable: 'The deck read channel is not available on this host.',
+  session: 'The session is not available on this host.',
   timeout: 'The deck read did not finish in time.',
   'read-failed': 'The deck read failed.',
   'bad-reply': 'The deck read returned a reply that could not be understood.',
@@ -41,8 +51,11 @@ const HOST_FAILURE_MESSAGES: Record<DeckPanelReadHostFailureKind, string> = {
 
 /** The deck's own failure kinds are short lowercase machine codes; anything else is not forwarded. */
 const SAFE_DECK_KIND = /^[a-z0-9][a-z0-9-]{0,39}$/
-const SAFE_DECK_MESSAGE = /^[\x20-\x7e]{1,200}$/
+// Plain prose only: path separators and colons are what host paths, URLs and error prefixes are made of.
+const SAFE_DECK_MESSAGE = /^[A-Za-z0-9 .,()'-]{1,200}$/
 const TIMED_OUT = Symbol('deck-panel-read-timed-out')
+
+type RunOutcome = { reply: DeckPanelReadReply } | { kind: DeckPanelReadHostFailureKind }
 
 /**
  * Per-connection, read-only bridge from the Remote relay to the deck's `deckPanelRead` service.
@@ -58,6 +71,7 @@ export class DeckPanelReadHost {
 
   constructor(
     private readonly resolveService: () => DeckPanelReadServiceLike | undefined,
+    private readonly resolveSession: DeckPanelReadSessionAuthority,
     private readonly logger?: SafeLogger,
     options: DeckPanelReadHostOptions = {},
   ) {
@@ -90,27 +104,49 @@ export class DeckPanelReadHost {
     const service = this.service()
     if (service === undefined) return this.fail('unavailable', operation)
 
-    // The deck receives a freshly built object that can only hold the keys its operation takes.
-    const params = parsed.data.operation === 'tree'
-      ? { sessionId: parsed.data.sessionId }
-      : { sessionId: parsed.data.sessionId, key: parsed.data.key }
+    // Session authority and deck read share one deadline; the abort cancels the authority's lookup on timeout.
+    const controller = new AbortController()
     const startedAt = performance.now()
-    let reply: unknown
+    let outcome: RunOutcome | typeof TIMED_OUT
     try {
-      reply = await withTimeout(Promise.resolve().then(() => service.call(parsed.data.operation, params)), this.timeoutMs)
-    } catch {
-      // The error text is neither logged nor sent: it can contain host paths and repository names.
-      return this.fail('read-failed', operation)
+      outcome = await withTimeout(this.run(service, parsed.data, controller.signal), this.timeoutMs)
+    } finally {
+      controller.abort()
     }
-    if (reply === TIMED_OUT) return this.fail('timeout', operation)
-    const checked = this.check(reply, parsed.data.sessionId)
-    if ('kind' in checked) return this.fail(checked.kind, operation)
-    if (checked.reply.ok === false) {
-      this.logger?.warn('deck panel read refused by deck', { operation, kind: checked.reply.error.kind })
+    if (outcome === TIMED_OUT) return this.fail('timeout', operation)
+    if ('kind' in outcome) return this.fail(outcome.kind, operation)
+    if (outcome.reply.ok === false) {
+      this.logger?.warn('deck panel read refused by deck', { operation, kind: outcome.reply.error.kind })
     } else {
       this.logger?.debug('deck panel read ok', { operation, durationMs: Math.round(performance.now() - startedAt) })
     }
-    return checked.reply
+    return outcome.reply
+  }
+
+  private async run(
+    service: DeckPanelReadServiceLike,
+    request: DeckPanelReadParams,
+    signal: AbortSignal,
+  ): Promise<RunOutcome> {
+    // The deck trims the session id, so the authority is asked about the same trimmed id.
+    try {
+      const workspace = await this.resolveSession(request.sessionId.trim(), signal)
+      if (typeof workspace !== 'string' || workspace === '') return { kind: 'session' }
+    } catch {
+      return { kind: 'session' }
+    }
+    // The deck receives a freshly built object that can only hold the keys its operation takes.
+    const params = request.operation === 'tree'
+      ? { sessionId: request.sessionId }
+      : { sessionId: request.sessionId, key: request.key }
+    let reply: unknown
+    try {
+      reply = await service.call(request.operation, params)
+    } catch {
+      // The error text is neither logged nor sent: it can contain host paths and repository names.
+      return { kind: 'read-failed' }
+    }
+    return this.check(reply, request.sessionId)
   }
 
   private service(): DeckPanelReadServiceLike | undefined {
@@ -126,7 +162,7 @@ export class DeckPanelReadHost {
   }
 
   /** Accept only a reply the Host can vouch for: plain JSON, within the byte bound, for the requested session. */
-  private check(reply: unknown, sessionId: string): { reply: DeckPanelReadReply } | { kind: DeckPanelReadHostFailureKind } {
+  private check(reply: unknown, sessionId: string): RunOutcome {
     let text: string | undefined
     try {
       text = JSON.stringify(reply)
@@ -153,7 +189,7 @@ export class DeckPanelReadHost {
 function requestedOperation(input: unknown): DeckPanelReadOperation | undefined {
   if (!isRecord(input)) return undefined
   const operation = input.operation
-  return operation === 'tree' || operation === 'ticket' ? operation : undefined
+  return (DECK_PANEL_READ_OPERATIONS as readonly unknown[]).includes(operation) ? operation as DeckPanelReadOperation : undefined
 }
 
 /** Keep only the deck's failure kind and fixed sentence; the deck's failures carry no data worth forwarding. */

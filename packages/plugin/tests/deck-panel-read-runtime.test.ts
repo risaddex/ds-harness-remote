@@ -7,19 +7,40 @@ import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
+import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 
 type Channel = AuthenticatedPeerChannel & { push(message: RemoteMessage): void; sent(): RemoteMessage[] }
 
 /** The deck lookup is the thirteenth positional argument; everything before it keeps its default. */
-function runtimeWithDeck(identities: IdentityStore, deck: () => DeckPanelReadServiceLike | undefined): HostPluginRuntime {
-  return new HostPluginRuntime(config(), identities, logger(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deck)
+function runtimeWithDeck(identities: IdentityStore, deck: () => DeckPanelReadServiceLike | undefined, gateway?: LocalTypertGateway): HostPluginRuntime {
+  const runtime = new HostPluginRuntime(config(), identities, logger(), gateway, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deck)
+  // The session authority only trusts the Harness session list on a Session API generation that serves it;
+  // the runtime reads the version only when a server is configured, which these tests do not need.
+  ;(runtime as unknown as { harnessVersion: string }).harnessVersion = '0.2.0-rc.1'
+  return runtime
+}
+
+/** A Harness whose peer can see exactly one session, answering the capability probe the way a real one does. */
+function gatewayWithSession(sessionId: string): LocalTypertGateway {
+  return {
+    invoke: vi.fn(async () => undefined),
+    dispatch: vi.fn(async (endpoint: string, payload?: { args?: Record<string, unknown> }) => {
+      if (endpoint !== 'session/list') return { ok: true as const }
+      return payload?.args?._request === undefined
+        ? { ok: false as const, error: { code: 'gateway/arguments-invalid', message: 'Unknown argument', details: {} } }
+        : { ok: true as const, value: { items: [{ sessionId, cwd: '/Users/me/the-workspace' }] } }
+    }),
+    open: vi.fn(async () => (async function* () { return })()),
+    failure: vi.fn(() => ({ code: 'internal', message: 'failed', details: {} })),
+    supportsCarrier: true,
+  } as unknown as LocalTypertGateway
 }
 
 describe('deck panel read through the Host runtime', () => {
   it('serves the read over an authenticated channel and follows the deck as it appears and goes away', async () => {
     let deck: DeckPanelReadServiceLike | undefined
     const call = vi.fn(async (_operation: string, params: Record<string, unknown>) => ({ ok: true, sessionId: params.sessionId, containers: [] }))
-    const runtime = runtimeWithDeck(identities(), () => deck)
+    const runtime = runtimeWithDeck(identities(), () => deck, gatewayWithSession('sess-1'))
     const channel = fakeChannel('deck-read', 'client-phone')
     const capabilities = async () => (await rpc<{ capabilities: string[] }>(channel, 'harness.transport.describe', {})).capabilities
     try {
@@ -34,6 +55,10 @@ describe('deck panel read through the Host runtime', () => {
       expect(await rpc(channel, 'deck.panel.read', { operation: 'tree', sessionId: 'sess-1' })).toEqual({ ok: true, sessionId: 'sess-1', containers: [] })
       expect(call).toHaveBeenCalledTimes(1)
       expect(call).toHaveBeenCalledWith('tree', { sessionId: 'sess-1' })
+
+      // A session this peer cannot see never reaches the deck, even with the feature announced.
+      expect(await rpc(channel, 'deck.panel.read', { operation: 'tree', sessionId: 'someone-elses-session' })).toMatchObject({ ok: false, error: { kind: 'session' } })
+      expect(call).toHaveBeenCalledTimes(1)
 
       deck = undefined
       expect(await capabilities()).not.toContain('deck.panel.read.v1')

@@ -30,6 +30,7 @@ export const DECK_PANEL_READ_HOST_FAILURE_KINDS = [
   'operation-not-allowed',
   'bad-request',
   'unavailable',
+  'session',
   'timeout',
   'read-failed',
   'bad-reply',

@@ -224,13 +224,15 @@ export class HostPluginRuntime {
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
         ), undefined, context.transportMode, Date.now, this.uploadBudget)
-      const workspaceGit = new WorkspaceGitHost(resolveSessionWorkspaceRoot(
+      // One session authority, scoped to this authenticated connection, for every session-scoped read.
+      const sessionAuthority = resolveSessionWorkspaceRoot(
         peerGateway,
         () => harnessSessionGeneration(this.harnessVersion) === 'v3',
         threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
         () => workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The session workspace is unavailable.', 'authority-unavailable'),
-      ))
+      )
+      const workspaceGit = new WorkspaceGitHost(sessionAuthority)
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId, peerIdentityKey: context.peerIdentityKey,
         identity: () => this.currentIdentity(), mode: context.transportMode,
@@ -263,7 +265,7 @@ export class HostPluginRuntime {
           ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : undefined,
         context.sameLinkIpv6Endpoints,
         workspaceGit,
-        new DeckPanelReadHost(() => this.deckPanelRead?.(), this.logger),
+        new DeckPanelReadHost(() => this.deckPanelRead?.(), sessionAuthority, this.logger),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

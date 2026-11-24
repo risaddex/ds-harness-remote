@@ -1,7 +1,7 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { createRpcRequest, type RemoteMessage, type RpcRequestPayload } from '@dsh-remote/protocol'
 import { describe, expect, it, vi } from 'vitest'
-import { DeckPanelReadHost, type DeckPanelReadHostOptions, type DeckPanelReadServiceLike } from '../src/deck-panel-read.js'
+import { DeckPanelReadHost, type DeckPanelReadHostOptions, type DeckPanelReadServiceLike, type DeckPanelReadSessionAuthority } from '../src/deck-panel-read.js'
 import type { SafeLogger } from '../src/logging.js'
 import { RpcRouter } from '../src/rpc-router.js'
 
@@ -20,9 +20,12 @@ function deckService(overrides: Partial<DeckPanelReadServiceLike> = {}) {
   return { service, call, available, anythingElse }
 }
 
-function routerFor(resolve: () => DeckPanelReadServiceLike | undefined, options?: DeckPanelReadHostOptions) {
+/** The default authority knows every session; scenarios that care about the gate pass their own. */
+const knowsEverySession: DeckPanelReadSessionAuthority = async () => '/workspace'
+
+function routerFor(resolve: () => DeckPanelReadServiceLike | undefined, options?: DeckPanelReadHostOptions, authority: DeckPanelReadSessionAuthority = knowsEverySession) {
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as SafeLogger
-  const host = new DeckPanelReadHost(resolve, logger, options)
+  const host = new DeckPanelReadHost(resolve, authority, logger, options)
   const router = new RpcRouter(
     undefined, logger, undefined, undefined, () => ['transport.relay', 'harness.remote.v1'], undefined, undefined, undefined,
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, host,
@@ -124,19 +127,13 @@ describe('deck panel read over the Remote relay', () => {
       ['null', null],
       ['array', ['tree', 'sess-1']],
     ]
+    // The schema itself is covered in the protocol package; here it is enough that a refusal never reaches the deck.
     const badRequest: [string, unknown][] = [
       ['tree with cwd', { operation: 'tree', sessionId: 'sess-1', cwd: '/Users/me/project' }],
-      ['tree with path', { operation: 'tree', sessionId: 'sess-1', path: '../x' }],
-      ['tree with key', { operation: 'tree', sessionId: 'sess-1', key: '83' }],
-      ['ticket with cwd', { operation: 'ticket', sessionId: 'sess-1', key: '83', cwd: '/tmp' }],
       ['ticket with path', { operation: 'ticket', sessionId: 'sess-1', key: '83', path: '/tmp' }],
-      ['ticket with comments flag', { operation: 'ticket', sessionId: 'sess-1', key: '83', comments: true }],
-      ['tree without session', { operation: 'tree' }],
-      ['blank session', { operation: 'tree', sessionId: '   ' }],
-      ['oversized session', { operation: 'tree', sessionId: 's'.repeat(513) }],
+      ['tree with key', { operation: 'tree', sessionId: 'sess-1', key: '83' }],
       ['ticket without key', { operation: 'ticket', sessionId: 'sess-1' }],
-      ['ticket with zero key', { operation: 'ticket', sessionId: 'sess-1', key: 0 }],
-      ['ticket with object key', { operation: 'ticket', sessionId: 'sess-1', key: { id: 1 } }],
+      ['blank session', { operation: 'tree', sessionId: '   ' }],
     ]
     await runScenarios([
       ...notAllowed.map(([name, params]) => ({ name, run: async () => { expect(failureKind(await read(router, params))).toBe('operation-not-allowed') } })),
@@ -172,6 +169,31 @@ describe('deck panel read over the Remote relay', () => {
     // The deck answers with the trimmed session id, so a padded request is the same session.
     const trimmed = deckService({ call: vi.fn(async () => treeReply('sess-1')) })
     expect(result(await read(routerFor(() => trimmed.service).router, { operation: 'tree', sessionId: '  sess-1 ' }))).toEqual(treeReply())
+  })
+
+  it('asks the relay session authority first and never lets an unknown session reach the deck', async () => {
+    const hang: DeckPanelReadSessionAuthority = (_id, signal) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(new Error('aborted'))) })
+    const rows: { name: string; authority: DeckPanelReadSessionAuthority; options?: DeckPanelReadHostOptions; kind: string }[] = [
+      { name: 'session not visible to this peer', authority: async () => undefined, kind: 'session' },
+      { name: 'authority answers with an empty workspace', authority: async () => '', kind: 'session' },
+      { name: 'authority throws with a path in the message', authority: async () => { throw new Error('ENOENT /Users/me/private-repo') }, kind: 'session' },
+      { name: 'authority never answers', authority: hang, options: { timeoutMs: 20 }, kind: 'timeout' },
+    ]
+    await runScenarios(rows.map(row => ({ name: row.name, run: async () => {
+      const { service, call } = deckService()
+      const { router } = routerFor(() => service, row.options, row.authority)
+      const response = await read(router, { operation: 'tree', sessionId: 'sess-1' })
+      expect(failureKind(response)).toBe(row.kind)
+      expect(JSON.stringify(response)).not.toMatch(/\/Users|ENOENT|private-repo/)
+      expect(call).not.toHaveBeenCalled()
+    } })))
+
+    // The authority is asked about the trimmed id, and only the session id ever reaches the deck: not the workspace it returned.
+    const authority = vi.fn<DeckPanelReadSessionAuthority>(async () => '/Users/me/the-workspace')
+    const { service, call } = deckService({ call: vi.fn(async () => treeReply('sess-1')) })
+    await read(routerFor(() => service, undefined, authority).router, { operation: 'tree', sessionId: '  sess-1 ' })
+    expect(authority.mock.calls.map(([id]) => id)).toEqual(['sess-1'])
+    expect(JSON.stringify(call.mock.calls)).not.toContain('the-workspace')
   })
 
   it('fails closed with no fabricated data and no host error text', async () => {
@@ -211,6 +233,7 @@ describe('deck panel read over the Remote relay', () => {
       { name: 'deck failure with data attached', reply: { ok: false, error: { kind: 'not-found', message: 'The deck read failed (not-found)', stack: 'at /Users/me' }, containers: [{ key: '1' }] }, expected: { kind: 'not-found', message: 'The deck read failed (not-found)' } },
       { name: 'kind that is not a short code', reply: { ok: false, error: { kind: 'ENOENT: /Users/me/repo', message: 'The deck read failed' } }, expected: { kind: 'read-failed', message: 'The deck read failed' } },
       { name: 'message with a line break', reply: { ok: false, error: { kind: 'parse', message: 'bad\n    at /Users/me/x.js:1' } }, expected: { kind: 'parse', message: 'The deck read failed (parse).' } },
+      { name: 'message that holds a host path', reply: { ok: false, error: { kind: 'parse', message: 'ENOENT /Users/me/repo/.git' } }, expected: { kind: 'parse', message: 'The deck read failed (parse).' } },
       { name: 'failure without an error object', reply: { ok: false }, expected: { kind: 'read-failed', message: 'The deck read failed (read-failed).' } },
     ]
     await runScenarios(rows.map(row => ({ name: row.name, run: async () => {

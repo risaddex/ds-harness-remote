@@ -65051,6 +65051,7 @@ var workspaceGitDiffResultSchema = external_exports.object({
 // packages/protocol/dist/deck-panel-read.js
 var DECK_PANEL_READ_CAPABILITY = "deck.panel.read.v1";
 var DECK_PANEL_READ_METHODS = ["deck.panel.read"];
+var DECK_PANEL_READ_OPERATIONS = ["tree", "ticket"];
 var DECK_PANEL_READ_MAX_SESSION_ID_CHARS = 512;
 var DECK_PANEL_READ_MAX_TICKET_KEY_CHARS = 200;
 var DECK_PANEL_READ_MAX_REPLY_BYTES = 512 * 1024;
@@ -108377,17 +108378,19 @@ var HOST_FAILURE_MESSAGES = {
   "operation-not-allowed": "Only the deck tree read and the deck ticket read are available over this channel.",
   "bad-request": "The request does not have the shape this read takes.",
   unavailable: "The deck read channel is not available on this host.",
+  session: "The session is not available on this host.",
   timeout: "The deck read did not finish in time.",
   "read-failed": "The deck read failed.",
   "bad-reply": "The deck read returned a reply that could not be understood.",
   oversized: "The deck read reply is too large for this channel."
 };
 var SAFE_DECK_KIND = /^[a-z0-9][a-z0-9-]{0,39}$/;
-var SAFE_DECK_MESSAGE = /^[\x20-\x7e]{1,200}$/;
+var SAFE_DECK_MESSAGE = /^[A-Za-z0-9 .,()'-]{1,200}$/;
 var TIMED_OUT = Symbol("deck-panel-read-timed-out");
 var DeckPanelReadHost = class {
-  constructor(resolveService, logger2, options = {}) {
+  constructor(resolveService, resolveSession, logger2, options = {}) {
     this.resolveService = resolveService;
+    this.resolveSession = resolveSession;
     this.logger = logger2;
     this.timeoutMs = options.timeoutMs ?? DECK_PANEL_READ_TIMEOUT_MS;
     this.probeTimeoutMs = options.probeTimeoutMs ?? DECK_PANEL_READ_PROBE_TIMEOUT_MS;
@@ -108418,23 +108421,38 @@ var DeckPanelReadHost = class {
     if (!parsed.success) return this.fail("bad-request", operation);
     const service = this.service();
     if (service === void 0) return this.fail("unavailable", operation);
-    const params = parsed.data.operation === "tree" ? { sessionId: parsed.data.sessionId } : { sessionId: parsed.data.sessionId, key: parsed.data.key };
+    const controller = new AbortController();
     const startedAt = performance.now();
-    let reply;
+    let outcome;
     try {
-      reply = await withTimeout(Promise.resolve().then(() => service.call(parsed.data.operation, params)), this.timeoutMs);
-    } catch {
-      return this.fail("read-failed", operation);
+      outcome = await withTimeout(this.run(service, parsed.data, controller.signal), this.timeoutMs);
+    } finally {
+      controller.abort();
     }
-    if (reply === TIMED_OUT) return this.fail("timeout", operation);
-    const checked = this.check(reply, parsed.data.sessionId);
-    if ("kind" in checked) return this.fail(checked.kind, operation);
-    if (checked.reply.ok === false) {
-      this.logger?.warn("deck panel read refused by deck", { operation, kind: checked.reply.error.kind });
+    if (outcome === TIMED_OUT) return this.fail("timeout", operation);
+    if ("kind" in outcome) return this.fail(outcome.kind, operation);
+    if (outcome.reply.ok === false) {
+      this.logger?.warn("deck panel read refused by deck", { operation, kind: outcome.reply.error.kind });
     } else {
       this.logger?.debug("deck panel read ok", { operation, durationMs: Math.round(performance.now() - startedAt) });
     }
-    return checked.reply;
+    return outcome.reply;
+  }
+  async run(service, request2, signal) {
+    try {
+      const workspace2 = await this.resolveSession(request2.sessionId.trim(), signal);
+      if (typeof workspace2 !== "string" || workspace2 === "") return { kind: "session" };
+    } catch {
+      return { kind: "session" };
+    }
+    const params = request2.operation === "tree" ? { sessionId: request2.sessionId } : { sessionId: request2.sessionId, key: request2.key };
+    let reply;
+    try {
+      reply = await service.call(request2.operation, params);
+    } catch {
+      return { kind: "read-failed" };
+    }
+    return this.check(reply, request2.sessionId);
   }
   service() {
     let service;
@@ -108471,7 +108489,7 @@ var DeckPanelReadHost = class {
 function requestedOperation(input4) {
   if (!isRecord24(input4)) return void 0;
   const operation = input4.operation;
-  return operation === "tree" || operation === "ticket" ? operation : void 0;
+  return DECK_PANEL_READ_OPERATIONS.includes(operation) ? operation : void 0;
 }
 function deckFailure(reply) {
   const error62 = isRecord24(reply.error) ? reply.error : {};
@@ -113532,13 +113550,14 @@ var HostPluginRuntime = class {
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
       ), void 0, context.transportMode, Date.now, this.uploadBudget);
-      const workspaceGit = new WorkspaceGitHost(resolveSessionWorkspaceRoot(
+      const sessionAuthority = resolveSessionWorkspaceRoot(
         peerGateway,
         () => harnessSessionGeneration(this.harnessVersion) === "v3",
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
         () => workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "authority-unavailable")
-      ));
+      );
+      const workspaceGit = new WorkspaceGitHost(sessionAuthority);
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId,
         peerIdentityKey: context.peerIdentityKey,
@@ -113572,7 +113591,7 @@ var HostPluginRuntime = class {
         resolveDshWeb && context.transportMode && context.lanWebAddress ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : void 0,
         context.sameLinkIpv6Endpoints,
         workspaceGit,
-        new DeckPanelReadHost(() => this.deckPanelRead?.(), this.logger)
+        new DeckPanelReadHost(() => this.deckPanelRead?.(), sessionAuthority, this.logger)
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {

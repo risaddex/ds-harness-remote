@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it } from 'vitest'
 import {
   DECK_PANEL_READ_CAPABILITY,
@@ -24,7 +25,7 @@ describe('deck panel read protocol contract', () => {
     expect(deckPanelReadParamsSchema.parse({ operation: 'ticket', sessionId: 'sess-1', key: 83 })).toEqual({ operation: 'ticket', sessionId: 'sess-1', key: 83 })
   })
 
-  it('refuses a working directory, a path or any other extra key, and any other operation', () => {
+  it('refuses a working directory, a path or any other extra key, and any other operation', async () => {
     const refused: unknown[] = [
       { operation: 'tree', sessionId: 's', cwd: '/tmp' },
       { operation: 'tree', sessionId: 's', path: 'a/b' },
@@ -38,10 +39,10 @@ describe('deck panel read protocol contract', () => {
       { operation: 'tree' },
       { operation: 'ticket', sessionId: 's' },
     ]
-    for (const input of refused) expect(deckPanelReadParamsSchema.safeParse(input).success, JSON.stringify(input)).toBe(false)
+    await runScenarios(refused.map(input => ({ name: JSON.stringify(input), run: async () => { expect(deckPanelReadParamsSchema.safeParse(input).success).toBe(false) } })))
   })
 
-  it('bounds the session id and the ticket key', () => {
+  it('bounds the session id and the ticket key', async () => {
     const tooLongSession = 's'.repeat(DECK_PANEL_READ_MAX_SESSION_ID_CHARS + 1)
     const tooLongKey = 'k'.repeat(DECK_PANEL_READ_MAX_TICKET_KEY_CHARS + 1)
     const refused: unknown[] = [
@@ -57,7 +58,7 @@ describe('deck panel read protocol contract', () => {
       { operation: 'ticket', sessionId: 's', key: 2 ** 60 },
       { operation: 'ticket', sessionId: 's', key: { id: 1 } },
     ]
-    for (const input of refused) expect(deckPanelReadParamsSchema.safeParse(input).success, JSON.stringify(input).slice(0, 80)).toBe(false)
+    await runScenarios(refused.map(input => ({ name: JSON.stringify(input).slice(0, 80), run: async () => { expect(deckPanelReadParamsSchema.safeParse(input).success).toBe(false) } })))
     expect(deckPanelReadParamsSchema.safeParse({ operation: 'tree', sessionId: 's'.repeat(DECK_PANEL_READ_MAX_SESSION_ID_CHARS) }).success).toBe(true)
   })
 
