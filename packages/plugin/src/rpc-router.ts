@@ -4,8 +4,13 @@ import type { DshWebPeer } from './dsh-web-host.js'
 import type { LanUploadHost } from './lan-upload.js'
 import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './transport-upgrade.js'
 import {
+  ATTENTION_INBOX_CAPABILITY,
   BINARY_UPLOAD_CAPABILITY,
   LAN_UPLOAD_CAPABILITY,
+  attentionAckUnreadRequestSchema,
+  attentionFollowRequestSchema,
+  attentionResolveTokenRequestSchema,
+  attentionRpcMethods,
   WORKSPACE_GIT_CAPABILITY,
   WORKSPACE_GIT_METHODS,
   DECK_PANEL_COMMENTS_CAPABILITY,
@@ -24,6 +29,7 @@ import {
   type RpcRequestPayload,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
+import type { AttentionPeerRoute } from './attention-tracker.js'
 import type { LoopbackHost } from './loopback-host.js'
 import type { RemoteFileViewerBridge } from './file-viewer-bridge.js'
 import type { HarnessRemoteBridge } from './harness-remote-bridge.js'
@@ -49,6 +55,7 @@ const emptyParamsSchema = z.object({}).strict()
 const historyConfigureSchema = z.object({ compact: z.boolean() }).strict()
 const apiMethods = new Set([
   ...sessionTransferMethods,
+  ...attentionRpcMethods,
   ...WORKSPACE_GIT_METHODS,
   ...DECK_PANEL_READ_METHODS,
   ...DECK_PANEL_COMMENTS_METHODS,
@@ -139,10 +146,12 @@ export class RpcRouter {
     private readonly workspaceGit?: WorkspaceGitHost,
     private readonly deckPanelRead?: DeckPanelReadHost,
     private readonly deckPanelComments?: DeckPanelCommentsHost,
+    private readonly attention?: AttentionPeerRoute,
   ) {}
 
   async closePeerStreams(): Promise<void> {
     this.lanWeb?.dispose()
+    this.attention?.close()
     this.loopback?.closeAll()
     this.sessionTransfer?.close()
     await Promise.all([
@@ -242,6 +251,7 @@ export class RpcRouter {
           ...(this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === 'linux' ? [DSH_WEB_LAN_IPV6_CAPABILITY] : []),
           ...(this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : []),
           ...(this.transportUpgrade === undefined ? [] : [TRANSPORT_UPGRADE_CAPABILITY]),
+          ...(this.attention === undefined ? [] : [ATTENTION_INBOX_CAPABILITY]),
         ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
         if (this.workspaceTypes !== undefined) {
@@ -341,6 +351,24 @@ export class RpcRouter {
       case 'remote.transport.upgrade.activate': return this.requireTransportUpgrade().activate(params)
       case 'remote.transport.upgrade.drain': return this.requireTransportUpgrade().drain(params)
       case 'remote.transport.upgrade.abort': return this.requireTransportUpgrade().abort(params)
+      case 'attention.list':
+        emptyParamsSchema.parse(params)
+        return this.requireAttention().list()
+      case 'attention.follow': {
+        const parsed = attentionFollowRequestSchema.parse(params)
+        return this.requireAttention().follow(parsed.enabled ?? true)
+      }
+      case 'attention.unfollow':
+        emptyParamsSchema.parse(params)
+        return this.requireAttention().unfollow()
+      case 'attention.resolveToken': {
+        const { token } = attentionResolveTokenRequestSchema.parse(params)
+        return this.requireAttention().resolveToken(token)
+      }
+      case 'attention.ackUnread': {
+        const { itemIds } = attentionAckUnreadRequestSchema.parse(params)
+        return this.requireAttention().ackUnread(itemIds)
+      }
       default:
         if (method.startsWith('session.transfer.')) {
           if (!this.sessionTransfer) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Session transfer is unavailable on this Host.')
@@ -383,6 +411,13 @@ export class RpcRouter {
       throw new RpcError('CAPABILITY_NOT_SUPPORTED', 'In-band transport upgrade is unavailable on this Host.')
     }
     return this.transportUpgrade
+  }
+
+  private requireAttention(): AttentionPeerRoute {
+    if (this.attention === undefined) {
+      throw new RpcError('FEATURE_NOT_SUPPORTED', 'Attention Inbox is unavailable on this Host.')
+    }
+    return this.attention
   }
 }
 

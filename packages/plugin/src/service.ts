@@ -1,5 +1,7 @@
 import { DshWebLanPeer } from './dsh-web-lan.js'
 import { DshWebPeer, type DshWebRuntime } from './dsh-web-host.js'
+import { HostAttentionTracker } from './attention-tracker.js'
+import { DetachedApprovalBudget } from './detached-approval-budget.js'
 import { SessionTransferHost, type TransferServices } from './session-transfer.js'
 import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
@@ -92,6 +94,8 @@ export class HostPluginRuntime {
   private harnessVersion?: string
   private pairing?: HostPairing
   private closed = false
+  private readonly detachedApprovalBudget = new DetachedApprovalBudget()
+  private readonly attention: HostAttentionTracker
   private readonly codex: CodexRemoteDomain
   private readonly acp: AcpRemoteGateway
   private readonly codexWorkspaceState = new CodexWorkspaceState(key => TerminalPolicy.releaseOwner(this.terminalOwners, key))
@@ -130,7 +134,22 @@ export class HostPluginRuntime {
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
-    this.codex = new CodexRemoteDomain(config.codex, logger)
+    this.attention = new HostAttentionTracker({
+      localGateway,
+      onDigest: digest => this.serverConnection?.publishAttentionDigest(digest),
+      logger,
+    })
+    this.codex = new CodexRemoteDomain(
+      config.codex,
+      logger,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      config.detachedApprovalGraceSec,
+      this.attention,
+      this.detachedApprovalBudget,
+    )
     this.acp = new AcpRemoteGateway(
       config.acp ?? { enabled: false, backends: [] },
       logger,
@@ -139,6 +158,9 @@ export class HostPluginRuntime {
       () => this.terminalEnabled,
       this.terminalSpawner,
       AcpWorkspaceStore.inDirectory(identities?.directory),
+      config.detachedApprovalGraceSec,
+      this.attention,
+      this.detachedApprovalBudget,
     )
     // Each operation runs on its own owner Peer minted from the Host gateway,
     // so its lifetime is independent of the client connection that submitted it.
@@ -201,6 +223,7 @@ export class HostPluginRuntime {
             this.schedule,
             uploadBridge === undefined ? undefined : body => uploadBridge.call({ route: 'api/session/uploadFileBinary', body }, true),
             attachmentHostPath,
+            this.attention.createHarnessBridgeObserver(),
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(
@@ -219,7 +242,11 @@ export class HostPluginRuntime {
       // service (and its shared fetch handler) may become ready after this
       // plugin is activated.
       const dispatcher = this.pluginRoutes?.(peerGateway?.peer)
-      const pluginRoute = dispatcher === undefined ? undefined : new PluginRouteBridge(dispatcher, this.logger)
+      const pluginRoute = dispatcher === undefined ? undefined : new PluginRouteBridge(
+        dispatcher,
+        this.logger,
+        (route, body, result) => this.attention.observeBotResponse(route, body, result),
+      )
       const workspaceUpload = new WorkspaceUploadHost(workspaceUploadRootResolver(
           peerGateway,
           () => harnessSessionGeneration(this.harnessVersion) === 'v3',
@@ -269,6 +296,10 @@ export class HostPluginRuntime {
         workspaceGit,
         new DeckPanelReadHost(() => this.deckPanelRead?.(), sessionAuthority, this.logger),
         this.deckPanelComments && new DeckPanelCommentsHost(this.deckPanelComments, sessionAuthority),
+        this.attention.createPeerRoute(
+          context.connectionId,
+          event => send(createEvent('attention.follow.event', event)),
+        ),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -321,15 +352,24 @@ export class HostPluginRuntime {
     void this.acp.start().catch(() => {
       this.logger.warn('ACP background initialization failed', { code: 'ACP_START_FAILED' })
     })
+    let attentionHarnessVersion = this.harnessVersion
     if (this.serverApi !== undefined) {
       this.harnessVersion = await this.readHarnessVersion()
+      attentionHarnessVersion = this.harnessVersion
       this.serverApi.setHarnessVersion(this.harnessVersion)
       this.serverApi.bindIdentity(this.identity)
       await this.serverApi.loadStoredPolicy()
       this.initializePairing()
       this.serverConnection = this.createServerConnection(this.identity)
       if (this.config.hostControl?.enabled !== false) this.serverConnection.start()
+    } else if (this.localGateway?.supportsCarrier === true && attentionHarnessVersion === undefined) {
+      attentionHarnessVersion = await readHarnessDistributionVersion()
     }
+    this.attention.start(attentionHarnessVersion)
+  }
+
+  attentionTracker(): HostAttentionTracker {
+    return this.attention
   }
 
   currentIdentity(): HostIdentity {
@@ -585,6 +625,7 @@ export class HostPluginRuntime {
     if (this.closed) return
     this.closed = true
     this.pairing?.close()
+    await this.attention.close()
     await this.serverConnection?.stop()
     this.compactionOperations.closeAll()
     await this.connections.close()
@@ -633,6 +674,7 @@ export class HostPluginRuntime {
         : () => loadNodeRtcFactory({ routeTargets: this.config.serverUrl === undefined ? [] : [this.config.serverUrl] }),
       () => this.hostCapabilities(),
       this.harnessVersion,
+      () => this.attention.publishCurrentDigestIfActive(),
     )
   }
 
