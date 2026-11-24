@@ -57,6 +57,7 @@ docs/        README.md、protocol.md、compatibility*.md、TODO.md、CHANGELOG.m
 pnpm install --frozen-lockfile
 pnpm --filter './packages/**' -r build
 pnpm -r check
+pnpm exec oxlint --type-aware --quiet packages apps scripts
 node scripts/verify-dsh-plugin.mjs
 pnpm -r test
 NODE_ENV=production pnpm --workspace-concurrency=1 -r build
@@ -65,6 +66,11 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 ```
 
 - Fresh clone 先建 `./packages/**`；全仓生产构建必加 `--workspace-concurrency=1`（防 Android prebuild 与 Plugin 打包并发竞争）。
+- 上列命令对应 [ci.yml](.github/workflows/ci.yml) 的各步（含 `oxlint`）；仓库自身不带 pre-commit 钩子，提交前自己跑全链。
+- 只改 `packages/plugin`（不装 Android）的最小环境：
+  1. `pnpm install --frozen-lockfile --filter '@dsh-remote/crypto...' --filter '@dsh-remote/webrtc...' --filter '@dsh-remote/client-core...' --filter './packages/plugin...'`。
+  2. 依次 `pnpm --filter` 构建 `@dsh-remote/protocol`、`crypto`、`webrtc`、`client-core`；缺一个会报 `Cannot find module '@dsh-remote/…'`。
+  3. 此环境下 `packages/plugin/tests/android-browse-subscription.test.mjs` 因缺 `@noble/ciphers` 无法加载，属预期，不是回归。
 - `apps/server` 独立验证前先建 `@dsh-remote/protocol`，禁交 `apps/server/data/` 与 `.env`。
 - `apps/android` 的 `check`/`test` 会执行 `build:renderers` 写忽略目录 `src/generated/`。
 - 安装入口仅维护 [install.sh](scripts/install.sh)（无 Windows 或自动卸载脚本）：
@@ -121,6 +127,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 - `packages/plugin/src/plugin-route-bridge.ts` 仅放行 `api/session/uploadFileBinary` 与 `packages/plugin/tests/fixtures/ds-bot-v0.3.8-endpoints.json` 175 端点 + `btw`/`btw-cancel`/`room-continue`：
   - 保持 30s 预算与不重放 mutation。
   - 管理/凭据/电脑控制/审批 `choice` 交认证后 DS-Bot handler 校验。
+- 带 `sessionId` 的 Host RPC（`workspace.git.*`、`workspace.upload*`、`deck.panel.read`）经 [workspace-upload-authority.ts](packages/plugin/src/workspace-upload-authority.ts) 的 `resolveSessionWorkspaceRoot` 校验该会话对当前已认证连接可见，再转发；不单信 Client 传来的 `sessionId`，禁用 Client 传入的 cwd/path。
 - 仅六类受限写入例外（禁通用 fs 写或远程桌面 RPC）：
   1. `workspace.upload(.lan).v1` 写会话验证根（排他 tmp+`fsync`+原子不覆盖；直连 1 GiB / 中继 20 MiB 动态复检 `channel.mode`；LAN 限 `>=1 MiB`，发 `open` 后禁换通道重放）。
   2. 官方 `workspace/create` 递归建非根无 NUL 绝对目录。
