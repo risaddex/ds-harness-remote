@@ -86,14 +86,30 @@ export class DeckPanelReadHost {
    * A missing service, `{ available: false }`, a throw and a slow answer all mean "not announced".
    */
   async available(): Promise<boolean> {
+    const outcome = await this.probe()
+    // One line per negotiation, debug only: it says why the feature was or was not announced, so a missing
+    // service can be told apart from a deck that answered "unavailable". The reason is the deck's own short
+    // machine code or one of the fixed words below; nothing from a thrown error is ever logged.
+    this.logger?.debug('deck panel read availability', { outcome })
+    return outcome === 'available'
+  }
+
+  private async probe(): Promise<string> {
     const service = this.service()
-    if (service === undefined) return false
+    if (service === undefined) return 'service-missing'
+    let answer: unknown
     try {
-      const answer = await withTimeout(Promise.resolve().then(() => service.available()), this.probeTimeoutMs)
-      return answer !== TIMED_OUT && isRecord(answer) && answer.available === true
+      answer = await withTimeout(Promise.resolve().then(() => service.available()), this.probeTimeoutMs)
     } catch {
-      return false
+      return 'probe-failed'
     }
+    if (answer === TIMED_OUT) return 'probe-timeout'
+    if (!isRecord(answer)) return 'probe-bad-answer'
+    if (answer.available === true) return 'available'
+    const reason = answer.reason
+    return answer.available === false && typeof reason === 'string' && SAFE_DECK_KIND.test(reason)
+      ? `unavailable:${reason}`
+      : 'unavailable'
   }
 
   async call(input: unknown): Promise<DeckPanelReadReply> {

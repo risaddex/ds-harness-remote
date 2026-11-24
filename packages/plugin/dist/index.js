@@ -108405,14 +108405,24 @@ var DeckPanelReadHost = class {
    * A missing service, `{ available: false }`, a throw and a slow answer all mean "not announced".
    */
   async available() {
+    const outcome = await this.probe();
+    this.logger?.debug("deck panel read availability", { outcome });
+    return outcome === "available";
+  }
+  async probe() {
     const service = this.service();
-    if (service === void 0) return false;
+    if (service === void 0) return "service-missing";
+    let answer;
     try {
-      const answer = await withTimeout(Promise.resolve().then(() => service.available()), this.probeTimeoutMs);
-      return answer !== TIMED_OUT && isRecord24(answer) && answer.available === true;
+      answer = await withTimeout(Promise.resolve().then(() => service.available()), this.probeTimeoutMs);
     } catch {
-      return false;
+      return "probe-failed";
     }
+    if (answer === TIMED_OUT) return "probe-timeout";
+    if (!isRecord24(answer)) return "probe-bad-answer";
+    if (answer.available === true) return "available";
+    const reason = answer.reason;
+    return answer.available === false && typeof reason === "string" && SAFE_DECK_KIND.test(reason) ? `unavailable:${reason}` : "unavailable";
   }
   async call(input4) {
     const operation = requestedOperation(input4);

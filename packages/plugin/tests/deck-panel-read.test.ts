@@ -110,6 +110,25 @@ describe('deck panel read over the Remote relay', () => {
     expect(first.available).toHaveBeenCalledTimes(2)
   })
 
+  it('logs one debug line per negotiation saying why the feature was or was not announced', async () => {
+    const rows: { name: string; resolve: () => DeckPanelReadServiceLike | undefined; options?: DeckPanelReadHostOptions; outcome: string }[] = [
+      { name: 'available', resolve: () => deckService().service, outcome: 'available' },
+      { name: 'service missing', resolve: () => undefined, outcome: 'service-missing' },
+      { name: 'deck says unavailable with a reason', resolve: () => deckService({ available: vi.fn(async () => ({ available: false, reason: 'load-failed' })) }).service, outcome: 'unavailable:load-failed' },
+      { name: 'unsafe reason is not logged', resolve: () => deckService({ available: vi.fn(async () => ({ available: false, reason: '/Users/me/repo' })) }).service, outcome: 'unavailable' },
+      { name: 'probe throws with a path', resolve: () => deckService({ available: vi.fn(() => { throw new Error('ENOENT /Users/me/secret') }) }).service, outcome: 'probe-failed' },
+      { name: 'probe never answers', resolve: () => deckService({ available: vi.fn(() => new Promise(() => undefined)) }).service, options: { probeTimeoutMs: 20 }, outcome: 'probe-timeout' },
+      { name: 'answer is not an object', resolve: () => deckService({ available: vi.fn(async () => true) }).service, outcome: 'probe-bad-answer' },
+    ]
+    await runScenarios(rows.map(row => ({ name: row.name, run: async () => {
+      const { router, logger } = routerFor(row.resolve, row.options)
+      await describeCapabilities(router)
+      const lines = (logger.debug as ReturnType<typeof vi.fn>).mock.calls.filter(([message]) => message === 'deck panel read availability')
+      expect(lines).toEqual([['deck panel read availability', { outcome: row.outcome }]])
+      expect(JSON.stringify((logger.debug as ReturnType<typeof vi.fn>).mock.calls)).not.toMatch(/\/Users|ENOENT|secret/)
+    } })))
+  })
+
   it('refuses every other operation and every extra or malformed key without calling the deck', async () => {
     const { service, call, available, anythingElse } = deckService()
     const { router } = routerFor(() => service)
