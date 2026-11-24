@@ -65048,6 +65048,28 @@ var workspaceGitDiffResultSchema = external_exports.object({
   truncatedReason: external_exports.enum(["max-bytes", "max-lines"]).optional()
 }).strict();
 
+// packages/protocol/dist/deck-panel-read.js
+var DECK_PANEL_READ_CAPABILITY = "deck.panel.read.v1";
+var DECK_PANEL_READ_METHODS = ["deck.panel.read"];
+var DECK_PANEL_READ_MAX_SESSION_ID_CHARS = 512;
+var DECK_PANEL_READ_MAX_TICKET_KEY_CHARS = 200;
+var DECK_PANEL_READ_MAX_REPLY_BYTES = 512 * 1024;
+var DECK_PANEL_READ_TIMEOUT_MS = 3e4;
+var DECK_PANEL_READ_PROBE_TIMEOUT_MS = 5e3;
+var sessionIdSchema = external_exports.string().max(DECK_PANEL_READ_MAX_SESSION_ID_CHARS).refine((value) => value.trim() !== "", "sessionId must not be blank");
+var ticketKeySchema = external_exports.union([
+  external_exports.string().max(DECK_PANEL_READ_MAX_TICKET_KEY_CHARS).refine((value) => value.trim() !== "", "key must not be blank"),
+  external_exports.number().refine((value) => Number.isSafeInteger(value) && value > 0, "key must be a positive safe integer")
+]);
+var deckPanelReadParamsSchema = external_exports.discriminatedUnion("operation", [
+  external_exports.object({ operation: external_exports.literal("tree"), sessionId: sessionIdSchema }).strict(),
+  external_exports.object({ operation: external_exports.literal("ticket"), sessionId: sessionIdSchema, key: ticketKeySchema }).strict()
+]);
+var deckPanelReadFailureSchema = external_exports.object({
+  ok: external_exports.literal(false),
+  error: external_exports.object({ kind: external_exports.string().min(1).max(40), message: external_exports.string().min(1).max(200) }).strict()
+}).strict();
+
 // packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
@@ -65200,6 +65222,7 @@ var sessionTransferMethods = [
 var rpcMethods = [
   ...sessionTransferMethods,
   ...WORKSPACE_GIT_METHODS,
+  ...DECK_PANEL_READ_METHODS,
   "workspace.upload.lan.open",
   "workspace.upload.open",
   "workspace.upload.chunk",
@@ -108349,6 +108372,128 @@ function countUnifiedDiffChanges(lines) {
   return { additions, deletions };
 }
 
+// packages/plugin/src/deck-panel-read.ts
+var HOST_FAILURE_MESSAGES = {
+  "operation-not-allowed": "Only the deck tree read and the deck ticket read are available over this channel.",
+  "bad-request": "The request does not have the shape this read takes.",
+  unavailable: "The deck read channel is not available on this host.",
+  timeout: "The deck read did not finish in time.",
+  "read-failed": "The deck read failed.",
+  "bad-reply": "The deck read returned a reply that could not be understood.",
+  oversized: "The deck read reply is too large for this channel."
+};
+var SAFE_DECK_KIND = /^[a-z0-9][a-z0-9-]{0,39}$/;
+var SAFE_DECK_MESSAGE = /^[\x20-\x7e]{1,200}$/;
+var TIMED_OUT = Symbol("deck-panel-read-timed-out");
+var DeckPanelReadHost = class {
+  constructor(resolveService, logger2, options = {}) {
+    this.resolveService = resolveService;
+    this.logger = logger2;
+    this.timeoutMs = options.timeoutMs ?? DECK_PANEL_READ_TIMEOUT_MS;
+    this.probeTimeoutMs = options.probeTimeoutMs ?? DECK_PANEL_READ_PROBE_TIMEOUT_MS;
+    this.maxReplyBytes = options.maxReplyBytes ?? DECK_PANEL_READ_MAX_REPLY_BYTES;
+  }
+  timeoutMs;
+  probeTimeoutMs;
+  maxReplyBytes;
+  /**
+   * True only while the deck answers exactly `{ available: true }`. It is asked on every call: a deck
+   * that appears after start-up becomes visible, and one that goes away or fails stops being announced.
+   * A missing service, `{ available: false }`, a throw and a slow answer all mean "not announced".
+   */
+  async available() {
+    const service = this.service();
+    if (service === void 0) return false;
+    try {
+      const answer = await withTimeout(Promise.resolve().then(() => service.available()), this.probeTimeoutMs);
+      return answer !== TIMED_OUT && isRecord24(answer) && answer.available === true;
+    } catch {
+      return false;
+    }
+  }
+  async call(input4) {
+    const operation = requestedOperation(input4);
+    if (operation === void 0) return this.fail("operation-not-allowed");
+    const parsed = deckPanelReadParamsSchema.safeParse(input4);
+    if (!parsed.success) return this.fail("bad-request", operation);
+    const service = this.service();
+    if (service === void 0) return this.fail("unavailable", operation);
+    const params = parsed.data.operation === "tree" ? { sessionId: parsed.data.sessionId } : { sessionId: parsed.data.sessionId, key: parsed.data.key };
+    const startedAt = performance.now();
+    let reply;
+    try {
+      reply = await withTimeout(Promise.resolve().then(() => service.call(parsed.data.operation, params)), this.timeoutMs);
+    } catch {
+      return this.fail("read-failed", operation);
+    }
+    if (reply === TIMED_OUT) return this.fail("timeout", operation);
+    const checked = this.check(reply, parsed.data.sessionId);
+    if ("kind" in checked) return this.fail(checked.kind, operation);
+    if (checked.reply.ok === false) {
+      this.logger?.warn("deck panel read refused by deck", { operation, kind: checked.reply.error.kind });
+    } else {
+      this.logger?.debug("deck panel read ok", { operation, durationMs: Math.round(performance.now() - startedAt) });
+    }
+    return checked.reply;
+  }
+  service() {
+    let service;
+    try {
+      service = this.resolveService();
+    } catch {
+      return void 0;
+    }
+    if (!isRecord24(service) || service.feature !== DECK_PANEL_READ_CAPABILITY) return void 0;
+    if (typeof service.available !== "function" || typeof service.call !== "function") return void 0;
+    return service;
+  }
+  /** Accept only a reply the Host can vouch for: plain JSON, within the byte bound, for the requested session. */
+  check(reply, sessionId) {
+    let text;
+    try {
+      text = JSON.stringify(reply);
+    } catch {
+      text = void 0;
+    }
+    if (typeof text !== "string") return { kind: "bad-reply" };
+    if (Buffer.byteLength(text, "utf8") > this.maxReplyBytes) return { kind: "oversized" };
+    const copy = JSON.parse(text);
+    if (!isRecord24(copy)) return { kind: "bad-reply" };
+    if (copy.ok === false) return { reply: deckFailure(copy) };
+    if (copy.ok !== true || copy.sessionId !== sessionId.trim()) return { kind: "bad-reply" };
+    return { reply: copy };
+  }
+  fail(kind, operation) {
+    this.logger?.warn("deck panel read failed", { ...operation === void 0 ? {} : { operation }, kind });
+    return { ok: false, error: { kind, message: HOST_FAILURE_MESSAGES[kind] } };
+  }
+};
+function requestedOperation(input4) {
+  if (!isRecord24(input4)) return void 0;
+  const operation = input4.operation;
+  return operation === "tree" || operation === "ticket" ? operation : void 0;
+}
+function deckFailure(reply) {
+  const error62 = isRecord24(reply.error) ? reply.error : {};
+  const kind = typeof error62.kind === "string" && SAFE_DECK_KIND.test(error62.kind) ? error62.kind : "read-failed";
+  const message = typeof error62.message === "string" && SAFE_DECK_MESSAGE.test(error62.message) ? error62.message : `The deck read failed (${kind}).`;
+  return { ok: false, error: { kind, message } };
+}
+function isRecord24(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+async function withTimeout(work, ms) {
+  let timer2;
+  const giveUp = new Promise((resolve11) => {
+    timer2 = setTimeout(() => resolve11(TIMED_OUT), ms);
+  });
+  try {
+    return await Promise.race([work, giveUp]);
+  } finally {
+    if (timer2 !== void 0) clearTimeout(timer2);
+  }
+}
+
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID19 } from "node:crypto";
 import { constants as constants7 } from "node:fs";
@@ -108891,9 +109036,9 @@ function diagnosticReason2(error62) {
   return message.replace(/\s+/g, " ").slice(0, 160) || "Unknown peer connection failure.";
 }
 function extractEndpoint(message) {
-  if (!isRecord24(message) || !isRecord24(message.payload)) return void 0;
+  if (!isRecord25(message) || !isRecord25(message.payload)) return void 0;
   const payload = message.payload;
-  if (isRecord24(payload.params)) {
+  if (isRecord25(payload.params)) {
     if (typeof payload.params.endpoint === "string") return payload.params.endpoint;
     if (typeof payload.params.method === "string") return payload.params.method;
   }
@@ -108901,7 +109046,7 @@ function extractEndpoint(message) {
   if (typeof payload.method === "string") return payload.method;
   return void 0;
 }
-function isRecord24(value) {
+function isRecord25(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function shortId2(value) {
@@ -109141,6 +109286,7 @@ var compactionOperationSchema = external_exports.object({
 var apiMethods = /* @__PURE__ */ new Set([
   ...sessionTransferMethods,
   ...WORKSPACE_GIT_METHODS,
+  ...DECK_PANEL_READ_METHODS,
   "harness.transport.describe",
   "dsh.web.open",
   "dsh.web.close",
@@ -109202,7 +109348,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints, workspaceGit) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints, workspaceGit, deckPanelRead) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -109222,6 +109368,7 @@ var RpcRouter = class {
     this.lanWeb = lanWeb;
     this.sameLinkIpv6Endpoints = sameLinkIpv6Endpoints;
     this.workspaceGit = workspaceGit;
+    this.deckPanelRead = deckPanelRead;
   }
   active = 0;
   async closePeerStreams() {
@@ -109306,6 +109453,8 @@ var RpcRouter = class {
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
           ...this.workspaceGit === void 0 ? [] : [WORKSPACE_GIT_CAPABILITY],
+          // Asked on every negotiation, never cached: the deck publishes its service after start-up and can go away.
+          ...await this.deckPanelRead?.available() === true ? [DECK_PANEL_READ_CAPABILITY] : [],
           ...this.sessionTransfer?.capabilities() ?? [],
           ...this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : [],
           ...this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === "linux" ? [DSH_WEB_LAN_IPV6_CAPABILITY] : [],
@@ -109430,6 +109579,10 @@ var RpcRouter = class {
       case "workspace.git.diff": {
         if (!this.workspaceGit) throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace Git is unavailable on this Host.");
         return this.workspaceGit.diff(params);
+      }
+      case "deck.panel.read": {
+        if (!this.deckPanelRead) throw new RpcError("FEATURE_NOT_SUPPORTED", "Deck panel read is unavailable on this Host.");
+        return this.deckPanelRead.call(params);
       }
       case "plugin.route.call":
         return this.requirePluginRoute().call(params);
@@ -111802,7 +111955,7 @@ var HarnessRemoteBridge = class {
       const record12 = await this.schedule.create(sessionId, request2, AbortSignal.timeout(6e4));
       return { ok: true, value: record12 };
     } catch (error62) {
-      const published = isRecord25(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
+      const published = isRecord26(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
       if (published === void 0) {
         return {
           ok: false,
@@ -112030,8 +112183,8 @@ var HarnessRemoteBridge = class {
     const args = parsed.data.args;
     const result = await this.gateway.dispatch(plugin ? "pluginManager/listPlugins" : "pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord25(value) && value[plugin ? "entryId" : "name"] === args[key]);
-    if (!isRecord25(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
+    const row = result.value.find((value) => isRecord26(value) && value[plugin ? "entryId" : "name"] === args[key]);
+    if (!isRecord26(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
     if (remoteOwnedBundleRow(row, plugin)) {
       throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
     }
@@ -112051,8 +112204,8 @@ var HarnessRemoteBridge = class {
     if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin update request.");
     const result = await this.gateway.dispatch("pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord25(value) && value.name === parsed.data.args.name);
-    if (!isRecord25(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
+    const row = result.value.find((value) => isRecord26(value) && value.name === parsed.data.args.name);
+    if (!isRecord26(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
       throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be updated remotely.");
     }
     if (remoteOwnedBundleRow(row, false)) {
@@ -112144,7 +112297,7 @@ var HarnessRemoteBridge = class {
   }
   async resolveMessageFilePayload(payload, endpoint, signal) {
     const deny = () => workspaceFileFailure("WORKSPACE_PATH_DENIED", "The message attachment is unavailable.", "outside-root");
-    if (!isRecord25(payload) || !isRecord25(payload.args)) throw deny();
+    if (!isRecord26(payload) || !isRecord26(payload.args)) throw deny();
     const args = payload.args;
     const sessionId = args.workspaceFileScopeId;
     if (typeof sessionId !== "string" || !isMessageFilePath(args.path)) throw deny();
@@ -112170,9 +112323,9 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
     }
     if (endpoint === "workspaceFiles/readBytes") {
-      const options = isRecord25(args.options) ? args.options : {};
+      const options = isRecord26(args.options) ? args.options : {};
       if ("baseFile" in args || "baseFile" in options) throw deny();
-      if (!isRecord25(options.range) && !isRecord25(args.range)) {
+      if (!isRecord26(options.range) && !isRecord26(args.range)) {
         if (reference.bytes > MAX_READ_BYTES2) {
           throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
         }
@@ -112186,7 +112339,7 @@ var HarnessRemoteBridge = class {
     return { ...payload, args: { ...args, path } };
   }
   async assertNativeWorkspaceFileCall(endpoint, payload, signal) {
-    const rootPayload = isRecord25(payload) ? payload : {};
+    const rootPayload = isRecord26(payload) ? payload : {};
     const args = requestArgs(payload);
     const sessionId = typeof args.workspaceFileScopeId === "string" ? args.workspaceFileScopeId : typeof args.sessionId === "string" ? args.sessionId : typeof args.agentId === "string" ? args.agentId : void 0;
     if (sessionId === void 0) {
@@ -112196,7 +112349,7 @@ var HarnessRemoteBridge = class {
     if (!sessionWorkspace) {
       throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
-    const options = isRecord25(args.options) ? args.options : void 0;
+    const options = isRecord26(args.options) ? args.options : void 0;
     const rawBaseFile = endpoint === "workspaceFiles/readBytes" ? typeof options?.baseFile === "string" ? options.baseFile : typeof args.baseFile === "string" ? args.baseFile : void 0 : void 0;
     if (endpoint === "workspaceFiles/readBytes") {
       if (options !== void 0 && "baseFile" in options && options.baseFile !== void 0 && typeof options.baseFile !== "string") {
@@ -112230,8 +112383,8 @@ var HarnessRemoteBridge = class {
       }
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd);
     }
-    let finalArgs = isRecord25(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
-    if (isRecord25(finalArgs.options)) {
+    let finalArgs = isRecord26(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
+    if (isRecord26(finalArgs.options)) {
       const { baseFile: _baseFile, ...restOptions } = finalArgs.options;
       finalArgs.options = restOptions;
     }
@@ -112243,11 +112396,11 @@ var HarnessRemoteBridge = class {
       const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
       const normalizedRange = { offset: offset2, length: boundedLength };
       if (requiresWorkspaceChangePath(this.harnessVersion)) {
-        finalArgs.options = { ...isRecord25(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
+        finalArgs.options = { ...isRecord26(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
         delete finalArgs.range;
       } else {
         finalArgs.range = normalizedRange;
-        if (isRecord25(finalArgs.options)) {
+        if (isRecord26(finalArgs.options)) {
           finalArgs.options = { ...finalArgs.options, range: normalizedRange };
         }
       }
@@ -112256,7 +112409,7 @@ var HarnessRemoteBridge = class {
         finalArgs.length = boundedLength;
       }
     }
-    return isRecord25(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
+    return isRecord26(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
   }
   async resolveWorkspaceRootForSession(sessionId, signal) {
     signal.throwIfAborted();
@@ -112360,7 +112513,7 @@ var HarnessRemoteBridge = class {
 };
 function journalSessionId(payload) {
   const address2 = requestArgs(payload).address;
-  return isRecord25(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
+  return isRecord26(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
 }
 function isPathOutside2(rel) {
   if (rel === ".." || isAbsolute11(rel)) return true;
@@ -112370,17 +112523,17 @@ function isPathOutside2(rel) {
   return rel.startsWith("../");
 }
 function byteOrLineRange2(args) {
-  const options = isRecord25(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord25(options.range)) return options.range;
-  return isRecord25(args.range) ? args.range : args;
+  const options = isRecord26(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord26(options.range)) return options.range;
+  return isRecord26(args.range) ? args.range : args;
 }
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord25(payload) || !isRecord25(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord26(payload) || !isRecord26(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord25(payload) || !isRecord25(payload.args)) return payload;
+  if (!isRecord26(payload) || !isRecord26(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -112394,10 +112547,10 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   return payload;
 }
 async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
-  if (endpoint !== "session/attachment" || !isRecord25(payload) || !isRecord25(payload.args)) return payload;
-  const request2 = isRecord25(payload.args.request) ? payload.args.request : void 0;
+  if (endpoint !== "session/attachment" || !isRecord26(payload) || !isRecord26(payload.args)) return payload;
+  const request2 = isRecord26(payload.args.request) ? payload.args.request : void 0;
   if (request2 === void 0) return payload;
-  const attachment = isRecord25(request2.attachment) ? request2.attachment : void 0;
+  const attachment = isRecord26(request2.attachment) ? request2.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request2.attachmentId === "string" ? request2.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
   if (!isDshV022OrNewer(harnessVersion)) {
@@ -112429,7 +112582,7 @@ async function findSessionAttachmentReference(gateway, sessionId, attachmentId, 
       const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
       const reference = extractAttachmentReference(result, attachmentId);
       if (reference !== void 0) return reference;
-      if (result.ok === true && isRecord25(result.value)) {
+      if (result.ok === true && isRecord26(result.value)) {
         if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
           beforeSeq = result.value.beforeSeq;
           continue;
@@ -112453,7 +112606,7 @@ function extractAttachmentReference(result, attachmentId) {
   const value = result.value;
   let records;
   if (Array.isArray(value)) records = value;
-  else if (isRecord25(value)) {
+  else if (isRecord26(value)) {
     if (Array.isArray(value.records)) records = value.records;
     else if (Array.isArray(value.events)) records = value.events;
   }
@@ -112474,7 +112627,7 @@ function findImageReference(value, attachmentId, depth) {
     return void 0;
   }
   const block = value;
-  const candidate = isRecord25(block.attachment) ? block.attachment : block;
+  const candidate = isRecord26(block.attachment) ? block.attachment : block;
   const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
   if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
     return {
@@ -112624,7 +112777,7 @@ var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constru
 var MAX_WHITELIST_PROJECTION_BYTES = 64 * 1024;
 var MAX_UNKNOWN_PROJECTION_BYTES = 4096;
 function filterSessionProjections(session2) {
-  if (!isRecord25(session2) || !isRecord25(session2.projections) || !isRecord25(session2.projections.values)) {
+  if (!isRecord26(session2) || !isRecord26(session2.projections) || !isRecord26(session2.projections.values)) {
     return session2;
   }
   const originalValues = session2.projections.values;
@@ -112665,15 +112818,15 @@ function trimSessionCatalogRows(endpoint, items) {
   return kept.length <= SESSION_LIST_ROW_BUDGET ? kept : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET);
 }
 function isListableRemoteSession(session2) {
-  return isRecord25(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
+  return isRecord26(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
 }
 function updatedAtOf(session2) {
-  return isRecord25(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
+  return isRecord26(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
 }
 function withSessionRowTitle(session2) {
-  if (!isRecord25(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
-  const values = isRecord25(session2.projections) ? session2.projections.values : void 0;
-  const title = isRecord25(values) ? values.title : void 0;
+  if (!isRecord26(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
+  const values = isRecord26(session2.projections) ? session2.projections.values : void 0;
+  const title = isRecord26(values) ? values.title : void 0;
   return typeof title === "string" && title !== "" ? { ...session2, title } : session2;
 }
 function filterSessionListProjections(resultOrEndpoint, maybeResult) {
@@ -112682,7 +112835,7 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
   if (endpoint !== void 0 && endpoint !== "session/list" && endpoint !== "session/search") return result;
   if (!result || !result.ok) return result;
   const filterList = (items) => trimSessionCatalogRows(endpoint, items).map(filterSessionProjections).map(withSessionRowTitle);
-  if (isRecord25(result.value)) {
+  if (isRecord26(result.value)) {
     let changed = false;
     const updated = { ...result.value };
     if (Array.isArray(result.value.items)) {
@@ -112706,27 +112859,27 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
 function filterRemotePluginInventory(endpoint, result) {
   if (!result.ok) return result;
   const isRemote = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-  const filterEntries = (entries) => entries.filter((entry) => !isRecord25(entry) || !isRemote(entry.moduleName));
+  const filterEntries = (entries) => entries.filter((entry) => !isRecord26(entry) || !isRemote(entry.moduleName));
   if (endpoint === "pluginManager/listPlugins" && Array.isArray(result.value)) {
     return { ...result, value: filterEntries(result.value) };
   }
   if (endpoint === "pluginManager/listBundles" && Array.isArray(result.value)) {
-    return { ...result, value: result.value.filter((bundle) => !isRecord25(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord25(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
+    return { ...result, value: result.value.filter((bundle) => !isRecord26(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord26(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
   }
-  if (endpoint === "pluginInventory/list" && isRecord25(result.value) && Array.isArray(result.value.entries)) {
+  if (endpoint === "pluginInventory/list" && isRecord26(result.value) && Array.isArray(result.value.entries)) {
     return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } };
   }
   return result;
 }
 function requestArgs(payload) {
   const root2 = record11(payload);
-  const args = isRecord25(root2.args) ? root2.args : root2;
+  const args = isRecord26(root2.args) ? root2.args : root2;
   return record11(args.request ?? args._request ?? args);
 }
 function record11(value) {
-  return isRecord25(value) ? value : {};
+  return isRecord26(value) ? value : {};
 }
-function isRecord25(value) {
+function isRecord26(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isCompactSnapshot(value) {
@@ -112735,7 +112888,7 @@ function isCompactSnapshot(value) {
 function remoteOwnedBundleRow(row, plugin) {
   const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
   if (remoteModule(plugin ? row.moduleName : row.name)) return true;
-  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord25(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
+  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord26(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
@@ -112754,11 +112907,11 @@ var MAX_CAUSE_DEPTH = 8;
 function requestIndexKey(ownerDeviceId, sessionId, requestId2) {
   return `${ownerDeviceId}\0${sessionId}\0${requestId2}`;
 }
-function isRecord26(value) {
+function isRecord27(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function commandIdOf(result) {
-  if (result?.ok !== true || !isRecord26(result.value)) return void 0;
+  if (result?.ok !== true || !isRecord27(result.value)) return void 0;
   return typeof result.value.commandId === "string" ? result.value.commandId : void 0;
 }
 var RemoteCompactionOperations = class {
@@ -113150,7 +113303,7 @@ function isAbortThrown(thrown, reason) {
       current = "cause" in current ? current.cause : void 0;
       continue;
     }
-    if (isRecord26(current)) {
+    if (isRecord27(current)) {
       if (typeof current.code === "string" && ABORT_CODE_PATTERN.test(current.code)) return true;
       if (typeof current.message === "string" && matchesSignalReason(current.message, reason)) return true;
       current = current.cause;
@@ -113165,13 +113318,13 @@ function matchesSignalReason(message, reason) {
   return reasonMessage !== void 0 && reasonMessage !== "" && message.includes(reasonMessage);
 }
 function isCommandSuccess(result) {
-  if (result.ok !== true || !isRecord26(result.value)) return false;
-  const command = isRecord26(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord27(result.value)) return false;
+  const command = isRecord27(result.value.result) ? result.value.result : void 0;
   return command?.kind === "success";
 }
 function commandText2(result) {
-  if (result.ok !== true || !isRecord26(result.value)) return void 0;
-  const command = isRecord26(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord27(result.value)) return void 0;
+  const command = isRecord27(result.value.result) ? result.value.result : void 0;
   return typeof command?.text === "string" && command.text.trim() !== "" ? command.text : void 0;
 }
 function sanitizeMessage(message) {
@@ -113190,13 +113343,13 @@ function waitWithTimeout(promise2, ms) {
   });
 }
 function readCompactionConfirmation(result, acceptedAt, commandId) {
-  if (result.ok !== true || !isRecord26(result.value)) return { kind: "unknown" };
+  if (result.ok !== true || !isRecord27(result.value)) return { kind: "unknown" };
   const records = Array.isArray(result.value.records) ? result.value.records : [];
   const legacy = Array.isArray(result.value.events) ? result.value.events : [];
   const events = [];
   for (const record12 of [...records, ...legacy]) {
-    const event2 = isRecord26(record12) && isRecord26(record12.event) ? record12.event : record12;
-    if (isRecord26(event2) && typeof event2.type === "string") events.push(event2);
+    const event2 = isRecord27(record12) && isRecord27(record12.event) ? record12.event : record12;
+    if (isRecord27(event2) && typeof event2.type === "string") events.push(event2);
   }
   if (events.length === 0) return { kind: "unknown" };
   const matchedCommandRun = commandId === void 0 ? latestCompactCommandId(events, acceptedAt) : hasCompactCommandRun(events, commandId) ? commandId : void 0;
@@ -113204,34 +113357,34 @@ function readCompactionConfirmation(result, acceptedAt, commandId) {
   if (resolvedCommandId === void 0) return { kind: "not-yet" };
   const end = [...events].reverse().find((event2) => {
     if (event2.type !== "compaction/end") return false;
-    const data3 = isRecord26(event2.data) ? event2.data : void 0;
+    const data3 = isRecord27(event2.data) ? event2.data : void 0;
     return data3?.sourceCommandId === resolvedCommandId;
   });
   if (end === void 0) {
     const hasCompactionStart = events.some((event2) => {
       if (event2.type !== "compaction/start") return false;
-      const data3 = isRecord26(event2.data) ? event2.data : void 0;
+      const data3 = isRecord27(event2.data) ? event2.data : void 0;
       return data3?.sourceCommandId === resolvedCommandId;
     });
     if (hasCompactionStart) return { kind: "not-yet", started: true };
     if (matchedCommandRun !== void 0) return { kind: "not-yet", commandRecorded: true };
     return { kind: "not-yet" };
   }
-  const data2 = isRecord26(end.data) ? end.data : {};
+  const data2 = isRecord27(end.data) ? end.data : {};
   const error62 = data2.error === void 0 ? void 0 : errorText(data2.error);
   return error62 === void 0 ? { kind: "finished" } : { kind: "finished", error: error62 };
 }
 function hasCompactCommandRun(events, commandId) {
   return events.some((event2) => {
     if (event2.type !== "command/run") return false;
-    const data2 = isRecord26(event2.data) ? event2.data : void 0;
+    const data2 = isRecord27(event2.data) ? event2.data : void 0;
     return data2?.name === "compact" && data2.commandId === commandId;
   });
 }
 function latestCompactCommandId(events, acceptedAt) {
   for (const event2 of [...events].reverse()) {
     if (event2.type !== "command/run") continue;
-    const data2 = isRecord26(event2.data) ? event2.data : void 0;
+    const data2 = isRecord27(event2.data) ? event2.data : void 0;
     if (data2?.name !== "compact" || typeof data2.commandId !== "string") continue;
     const time3 = typeof event2.time === "number" ? event2.time : 0;
     if (time3 !== 0 && time3 < acceptedAt - 5e3) continue;
@@ -113241,7 +113394,7 @@ function latestCompactCommandId(events, acceptedAt) {
 }
 function errorText(error62) {
   if (typeof error62 === "string") return sanitizeMessage(error62);
-  if (isRecord26(error62)) {
+  if (isRecord27(error62)) {
     const message = error62.message ?? error62.error ?? error62.reason;
     if (typeof message === "string" && message.trim() !== "") return sanitizeMessage(message);
     try {
@@ -113277,7 +113430,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 // packages/plugin/src/service.ts
 var CODEX_STARTUP_GRACE_MS = 1500;
 var HostPluginRuntime = class {
-  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices, resolveDshWeb, codexStartupGraceMs = CODEX_STARTUP_GRACE_MS, attachmentHostPath) {
+  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices, resolveDshWeb, codexStartupGraceMs = CODEX_STARTUP_GRACE_MS, attachmentHostPath, deckPanelRead) {
     this.config = config2;
     this.identities = identities;
     this.logger = logger2;
@@ -113287,6 +113440,7 @@ var HostPluginRuntime = class {
     this.pluginRoutes = pluginRoutes;
     this.schedule = schedule;
     this.codexStartupGraceMs = codexStartupGraceMs;
+    this.deckPanelRead = deckPanelRead;
     this.terminalEnabled = config2.terminal.enabled;
     this.loopbackPorts = [...config2.loopback.ports];
     this.codex = new CodexRemoteDomain(config2.codex, logger2);
@@ -113417,7 +113571,8 @@ var HostPluginRuntime = class {
         }, resolveDshWeb) : void 0,
         resolveDshWeb && context.transportMode && context.lanWebAddress ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : void 0,
         context.sameLinkIpv6Endpoints,
-        workspaceGit
+        workspaceGit,
+        new DeckPanelReadHost(() => this.deckPanelRead?.(), this.logger)
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -114468,21 +114623,21 @@ var LocalPluginUpgrade = class {
 };
 function bundleUpdatable(listed, packageName) {
   if (!Array.isArray(listed)) return false;
-  return listed.some((row) => isRecord27(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
+  return listed.some((row) => isRecord28(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
 }
 function classifyUpdateResult(result) {
-  if (!isRecord27(result) || !isRecord27(result.result)) return { status: "failed", message: "update-failed" };
+  if (!isRecord28(result) || !isRecord28(result.result)) return { status: "failed", message: "update-failed" };
   const application = result.result.application;
   if (application === "applied" || application === "restart-required") return { status: "started" };
   return { status: "failed", message: failureMessage(result.result.error) };
 }
 function failureMessage(error62) {
-  if (!isRecord27(error62)) return "update-failed";
+  if (!isRecord28(error62)) return "update-failed";
   const code = typeof error62.code === "string" && error62.code.length > 0 && error62.code.length <= 80 ? error62.code : "update-failed";
   const diagnostic = typeof error62.diagnostic === "string" ? error62.diagnostic.replace(/\s+/g, " ").trim().slice(0, 180) : "";
   return diagnostic === "" ? code : `${code}: ${diagnostic}`;
 }
-function isRecord27(value) {
+function isRecord28(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -115197,7 +115352,10 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         (ref) => {
           const attachments = safeGetService(ctx, "attachments") ?? safeGetService(rootContext(ctx), "attachments");
           return attachments?.fileHostPath?.(ref);
-        }
+        },
+        // Optional and late: the deck publishes `deckPanelRead` after start-up, so it is looked up on every
+        // use. A sibling bundle's service may not be visible from this plugin's own context.
+        () => safeGetService(ctx, "deckPanelRead") ?? safeGetService(rootContext(ctx), "deckPanelRead")
       );
       let nextClientRuntime;
       if (nextConfig.serverUrl !== void 0 && connection !== void 0) {
