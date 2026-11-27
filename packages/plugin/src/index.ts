@@ -35,6 +35,7 @@ import type { LocalTypertGateway, TypertGatewayLike } from './typert-gateway-con
 import { subprocessTerminalSpawner, type HostSubprocessLike } from './codex-workspace-bridge.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { FileViewerHostServiceLike } from './file-viewer-bridge.js'
+import type { DeckPanelCommentsServiceLike } from './deck-panel-comments.js'
 import type { DeckPanelReadServiceLike } from './deck-panel-read.js'
 import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './plugin-route-dispatcher.js'
 import { installRemoteDiscoveryTools } from './remote-tools.js'
@@ -422,6 +423,8 @@ async function activate(
         // use. A sibling bundle's service may not be visible from this plugin's own context.
         () => (safeGetService(ctx, 'deckPanelRead')
           ?? safeGetService(rootContext(ctx), 'deckPanelRead')) as DeckPanelReadServiceLike | undefined,
+        () => (safeGetService(ctx, 'deckPanelComments')
+          ?? safeGetService(rootContext(ctx), 'deckPanelComments')) as DeckPanelCommentsServiceLike | undefined,
       )
 
       let nextClientRuntime: ClientModeRuntime | undefined

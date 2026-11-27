@@ -38,11 +38,11 @@ export const DECK_PANEL_READ_HOST_FAILURE_KINDS = [
 ] as const
 export type DeckPanelReadHostFailureKind = typeof DECK_PANEL_READ_HOST_FAILURE_KINDS[number]
 
-const sessionIdSchema = z.string().max(DECK_PANEL_READ_MAX_SESSION_ID_CHARS)
+export const deckPanelSessionIdSchema = z.string().max(DECK_PANEL_READ_MAX_SESSION_ID_CHARS)
   .refine(value => value.trim() !== '', 'sessionId must not be blank')
 
 /** A ticket key is a short string (Linear, local Markdown) or a positive safe integer (GitHub, GitLab). */
-const ticketKeySchema = z.union([
+export const deckPanelTicketKeySchema = z.union([
   z.string().max(DECK_PANEL_READ_MAX_TICKET_KEY_CHARS).refine(value => value.trim() !== '', 'key must not be blank'),
   z.number().refine(value => Number.isSafeInteger(value) && value > 0, 'key must be a positive safe integer'),
 ])
@@ -52,8 +52,8 @@ const ticketKeySchema = z.union([
  * session; a Client never supplies a working directory or a path, and any extra key is refused.
  */
 export const deckPanelReadParamsSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('tree'), sessionId: sessionIdSchema }).strict(),
-  z.object({ operation: z.literal('ticket'), sessionId: sessionIdSchema, key: ticketKeySchema }).strict(),
+  z.object({ operation: z.literal('tree'), sessionId: deckPanelSessionIdSchema }).strict(),
+  z.object({ operation: z.literal('ticket'), sessionId: deckPanelSessionIdSchema, key: deckPanelTicketKeySchema }).strict(),
 ])
 export type DeckPanelReadParams = z.infer<typeof deckPanelReadParamsSchema>
 
