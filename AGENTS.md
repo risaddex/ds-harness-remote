@@ -129,7 +129,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
   - 管理/凭据/电脑控制/审批 `choice` 交认证后 DS-Bot handler 校验。
 - 带 `sessionId` 的 Host RPC（`workspace.git.*`、`workspace.upload*`、`deck.panel.read`）经 [workspace-upload-authority.ts](packages/plugin/src/workspace-upload-authority.ts) 的 `resolveSessionWorkspaceRoot` 校验该会话对当前已认证连接可见，再转发；不单信 Client 传来的 `sessionId`，禁用 Client 传入的 cwd/path。
 - 仅六类受限写入例外（禁通用 fs 写或远程桌面 RPC）：
-  1. `workspace.upload(.lan).v1` 写会话验证根（排他 tmp+`fsync`+原子不覆盖；直连 1 GiB / 中继 20 MiB 动态复检 `channel.mode`；LAN 限 `>=1 MiB`，发 `open` 后禁换通道重放）。
+  1. `workspace.upload(.lan).v1` 写会话验证根（排他 tmp+`fsync`+原子不覆盖；直连 1 GiB / 中继普通用户 20 MiB、有效会员 100 MiB，动态复检 `channel.mode`；LAN 限 `>=1 MiB`，发 `open` 后禁换通道重放）。
   2. 官方 `workspace/create` 递归建非根无 NUL 绝对目录。
   3. AGY 私有 `tmp` 图缓（PNG/JPEG/WebP/GIF，≤4×8 MiB / 总 512 MiB / 24h 清理）。
   4. OpenCode v1 `--help` 确认后经私有 `127.0.0.1` 认证 HTTP 调 `PATCH time.archived`（纯 stdio/v2 返 `OPENCODE_ARCHIVE_UNAVAILABLE`）。
