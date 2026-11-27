@@ -1,7 +1,12 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { createRpcRequest, type RemoteMessage, type RpcErrorPayload, type RpcResponsePayload } from '@dsh-remote/protocol'
+import { createNoisePrologue, fromBase64Url, generateKeyPair, NoiseIkSession, toBase64Url } from '@dsh-remote/crypto'
+import { createControlFrame, createRpcRequest, decodeMessage, encodeMessage, SecureMessageCodec, type RemoteMessage, type RpcErrorPayload, type RpcResponsePayload } from '@dsh-remote/protocol'
+import type { ConnectionController } from '../src/connection-controller.js'
+import type { HostServerApi } from '../src/server-api.js'
+import { HostServerConnection } from '../src/server-connection.js'
 import { describe, expect, it, vi } from 'vitest'
 import type { ResolvedConfig } from '../src/config.js'
+import type { DeckPanelCommentsServiceLike } from '../src/deck-panel-comments.js'
 import type { DeckPanelReadServiceLike } from '../src/deck-panel-read.js'
 import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
@@ -12,8 +17,8 @@ import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 type Channel = AuthenticatedPeerChannel & { push(message: RemoteMessage): void; sent(): RemoteMessage[] }
 
 /** The deck lookup is the thirteenth positional argument; everything before it keeps its default. */
-function runtimeWithDeck(identities: IdentityStore, deck: () => DeckPanelReadServiceLike | undefined, gateway?: LocalTypertGateway): HostPluginRuntime {
-  const runtime = new HostPluginRuntime(config(), identities, logger(), gateway, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deck)
+function runtimeWithDeck(identities: IdentityStore, deck: () => DeckPanelReadServiceLike | undefined, gateway?: LocalTypertGateway, comments?: () => DeckPanelCommentsServiceLike | undefined): HostPluginRuntime {
+  const runtime = new HostPluginRuntime(config(), identities, logger(), gateway, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, deck, comments)
   // The session authority only trusts the Harness session list on a Session API generation that serves it;
   // the runtime reads the version only when a server is configured, which these tests do not need.
   ;(runtime as unknown as { harnessVersion: string }).harnessVersion = '0.2.0-rc.1'
@@ -67,6 +72,82 @@ describe('deck panel read through the Host runtime', () => {
     }
   })
 
+  it('preserves old and extended deck replies over the encrypted relay without changing the request', async () => {
+    const sessionId = 'sess-1'
+    const identity = { key: '42', number: 42, title: 'Example issue', state: 'OPEN' }
+    const url = 'https://github.com/example/repo/issues/42'
+    const summary = { ...identity, url }
+    const detail = {
+      ...identity, labels: [{ name: 'bug' }], body: 'Example issue body', acceptanceCriteria: [],
+      progress: { percent: null, note: '', updatedAt: null, entries: [] },
+    }
+    const actions = [{ id: 'fix', label: 'Fix', prompt: 'Fix issue #42 in example/repo.\nRead the ticket before editing.' }]
+    const rows = [
+      { name: 'legacy tree', request: { operation: 'tree', sessionId } as const, body: { containers: [] } },
+      { name: 'legacy ticket', request: { operation: 'ticket', sessionId, key: 42 } as const, body: { ticket: detail } },
+      { name: 'legacy ticket with URL', request: { operation: 'ticket', sessionId, key: '42' } as const, body: { ticket: { ...detail, url } } },
+      { name: 'extended tree', request: { operation: 'tree', sessionId } as const, body: { containers: [], standaloneIssues: [summary] } },
+      { name: 'extended ticket', request: { operation: 'ticket', sessionId, key: '42' } as const, body: { ticket: { ...detail, actions, url } } },
+    ]
+    const call = vi.fn<DeckPanelReadServiceLike['call']>()
+    const deck = { feature: 'deck.panel.read.v1', available: async () => ({ available: true }), call }
+    const store = identities()
+    const runtime = runtimeWithDeck(store, () => deck, gatewayWithSession(sessionId))
+    await runtime.start()
+    const relay = testRelay(runtime, store)
+    try {
+      await relay.connect()
+      expect(await relay.rpc('harness.transport.describe', {})).toMatchObject({ capabilities: expect.arrayContaining(['deck.panel.read.v1']) })
+      await runScenarios(rows.map(({ name, request, body }) => ({ name, run: async () => {
+        const { operation, ...params } = request
+        const reply = { ok: true, sessionId, ...body }
+        call.mockClear().mockResolvedValue(reply)
+        expect(await relay.rpc('deck.panel.read', request)).toStrictEqual(reply)
+        expect(call.mock.calls).toStrictEqual([[operation, params]])
+      } })))
+    } finally {
+      await relay.close()
+      await runtime.close()
+    }
+  })
+
+  it('negotiates comments independently and scopes each encrypted, paginated read', async () => {
+    const sessionId = 'sess-1'
+    const key = '42'
+    const params = { sessionId, key }
+    const list = vi.fn<DeckPanelCommentsServiceLike['list']>()
+    let comments: DeckPanelCommentsServiceLike | undefined
+    const store = identities()
+    const runtime = runtimeWithDeck(store, () => undefined, gatewayWithSession(sessionId), () => comments)
+    await runtime.start()
+    const relay = testRelay(runtime, store)
+    const describeHost = async () => (await relay.rpc('harness.transport.describe', {})) as { capabilities: string[] }
+    try {
+      await relay.connect()
+      expect((await describeHost()).capabilities).not.toContain('deck.panel.comments.v1')
+      expect(await relay.rpc('deck.panel.comments', params)).toMatchObject({ ok: false, error: { kind: 'unavailable' } })
+      comments = { feature: 'deck.panel.comments.v1', available: async () => ({ available: true }), list }
+      const { capabilities } = await describeHost()
+      expect(capabilities).toContain('deck.panel.comments.v1')
+      expect(capabilities).not.toContain('deck.panel.read.v1')
+      expect(await relay.rpc('deck.panel.comments', { ...params, sessionId: 'outside-session' })).toMatchObject({ ok: false, error: { kind: 'session' } })
+      expect(await relay.rpc('deck.panel.comments', { ...params, cwd: '/another-repo' })).toMatchObject({ ok: false, error: { kind: 'bad-request' } })
+      expect(list).not.toHaveBeenCalled()
+      const first = { ok: true, sessionId, key, comments: [{ body: 'Olá', author: 'example' }], nextCursor: 'opaque-token' }
+      list.mockResolvedValueOnce(first)
+      expect(await relay.rpc('deck.panel.comments', params)).toStrictEqual(first)
+      const second = { ok: true, sessionId, key, comments: [{ body: 'Second page' }], truncated: true }
+      list.mockResolvedValueOnce(second)
+      expect(await relay.rpc('deck.panel.comments', { ...params, cursor: first.nextCursor })).toStrictEqual(second)
+      expect(list.mock.calls).toStrictEqual([[params], [{ ...params, cursor: first.nextCursor }]])
+      comments = undefined
+      expect((await describeHost()).capabilities).not.toContain('deck.panel.comments.v1')
+    } finally {
+      await relay.close()
+      await runtime.close()
+    }
+  })
+
   it('never reaches the deck from a channel that is not authenticated or not trusted', async () => {
     const call = vi.fn()
     const available = vi.fn(async () => ({ available: true }))
@@ -108,6 +189,98 @@ async function rpc<T = unknown>(channel: Channel, method: string, params: unknow
   })
   if (response!.type === 'rpc.error') throw Object.assign(new Error((response!.payload as RpcErrorPayload).message), { code: (response!.payload as RpcErrorPayload).code })
   return (response!.payload as RpcResponsePayload).result as T
+}
+
+// Only the server's socket and account directory are simulated. Use the actual Host
+// relay Noise handshake, encrypted frame transport, and runtime RPC routing.
+function testRelay(runtime: HostPluginRuntime, store: IdentityStore) {
+  const host = { ...runtime.currentIdentity(), ...generateKeyPair() }
+  const client = { ...generateKeyPair(), deviceId: 'client-phone', name: 'Phone', platform: 'android' as const, membershipId: 'membership-1' }
+  vi.mocked(store.trustedPeer).mockReturnValue({ ...client, fingerprint: 'PHONE', trustedAt: 1 })
+  const api = {
+    baseUrl: 'https://relay.example',
+    authenticate: async () => ({ accessToken: 'test-token' }),
+    deviceFor: async () => ({ ...client, role: 'client', identityKey: client.publicKey }),
+  } as unknown as HostServerApi
+  const frames: { type: string; payload: { data: string; ciphertext: string } }[] = []
+  const socket = {
+    readyState: 0,
+    onopen: null as ((event: unknown) => void) | null,
+    onmessage: null as ((event: { data: unknown }) => void) | null,
+    onerror: null,
+    onclose: null,
+    send(data: string) { frames.push(JSON.parse(data)) },
+    close() { this.readyState = 3 },
+  }
+  const connections = {
+    accept: (channel: AuthenticatedPeerChannel) => runtime.acceptAuthenticatedPeer(channel),
+    closeConnection: async () => false,
+    close: async () => undefined,
+  } as unknown as ConnectionController
+  const server = new HostServerConnection(config(), host, store, api, connections, logger(), () => socket)
+  const connectionId = 'connection-deck-relay'
+  const noise = new NoiseIkSession({
+    role: 'initiator', localPrivateKey: client.privateKey, localPublicKey: client.publicKey,
+    remotePublicKey: host.publicKey, prologue: createNoisePrologue(connectionId, host.deviceId, client.deviceId),
+  })
+  const incoming = new SecureMessageCodec()
+  const outgoing = new SecureMessageCodec()
+  let counter = 0
+  let consumedFrames = 0
+  const receive = (type: Parameters<typeof createControlFrame>[0], payload: unknown) => {
+    socket.onmessage?.({ data: JSON.stringify(createControlFrame(type, payload)) })
+  }
+  return {
+    async connect() {
+      server.start()
+      await vi.waitFor(() => expect(socket.onopen).not.toBeNull())
+      socket.readyState = 1
+      socket.onopen?.({})
+      await vi.waitFor(() => expect(frames.some(frame => frame.type === 'hello')).toBe(true))
+      receive('hello.ack', {
+        protocol: 1, serverVersion: '0.1.0', connectionSessionId: 'control-deck', heartbeatIntervalMs: 25_000,
+        maxControlFrameBytes: 65_536, maxRelayFrameBytes: 1_048_576, capabilities: ['transport.relay'],
+      })
+      receive('connect.incoming', {
+        connectionId, clientDeviceId: client.deviceId, clientIdentityKey: client.publicKey,
+        authorization: 'account', preferredTransports: ['relay'],
+      })
+      await vi.waitFor(() => expect(frames.some(frame => frame.type === 'connect.accepted')).toBe(true))
+      receive('secure.handshake', { connectionId, targetDeviceId: host.deviceId, step: 1, data: toBase64Url(noise.writeHandshake()) })
+      const handshake = await vi.waitFor(() => {
+        const frame = frames.find(sent => sent.type === 'secure.handshake')
+        expect(frame).toBeDefined()
+        return frame!
+      })
+      noise.readHandshake(fromBase64Url(handshake.payload.data))
+      consumedFrames = frames.length
+    },
+    async rpc(method: Parameters<typeof createRpcRequest>[0], params: unknown) {
+      const request = createRpcRequest(method, params)
+      for (const fragment of outgoing.encode(encodeMessage(request))) {
+        receive('relay', { connectionId, targetDeviceId: host.deviceId, counter: counter++, ciphertext: toBase64Url(noise.encrypt(fragment)) })
+      }
+      return vi.waitFor(() => {
+        while (consumedFrames < frames.length) {
+          const frame = frames[consumedFrames++]!
+          if (frame.type !== 'relay') continue
+          const plaintext = incoming.decode(noise.decrypt(fromBase64Url(frame.payload.ciphertext)))
+          if (plaintext === undefined) continue
+          const message = decodeMessage(plaintext)
+          if (message.type !== 'rpc.response' && message.type !== 'rpc.error') continue
+          const response = message.payload as RpcResponsePayload | RpcErrorPayload
+          if (response.requestId !== request.id) continue
+          if ('result' in response) return response.result
+          throw new Error(`relay RPC ${method} failed: ${response.code}`)
+        }
+        throw new Error(`waiting for relay RPC ${method}`)
+      })
+    },
+    async close() {
+      noise.destroy()
+      await server.stop()
+    },
+  }
 }
 
 function identities(): IdentityStore {

@@ -5,6 +5,7 @@ import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
 import type { HostPairingView } from './pairing-contract.js'
 import { WorkspaceGitHost } from './workspace-git.js'
+import { DeckPanelCommentsHost, type DeckPanelCommentsServiceLike } from './deck-panel-comments.js'
 import { DeckPanelReadHost, type DeckPanelReadServiceLike } from './deck-panel-read.js'
 import { WorkspaceUploadHost } from './workspace-upload.js'
 import { WorkspaceUploadBudget } from './workspace-upload-budget.js'
@@ -125,6 +126,7 @@ export class HostPluginRuntime {
      * start-up: the deck publishes the service later and may be absent or older.
      */
     private readonly deckPanelRead?: () => DeckPanelReadServiceLike | undefined,
+    private readonly deckPanelComments?: () => DeckPanelCommentsServiceLike | undefined,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -266,6 +268,7 @@ export class HostPluginRuntime {
         context.sameLinkIpv6Endpoints,
         workspaceGit,
         new DeckPanelReadHost(() => this.deckPanelRead?.(), sessionAuthority, this.logger),
+        this.deckPanelComments && new DeckPanelCommentsHost(this.deckPanelComments, sessionAuthority),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

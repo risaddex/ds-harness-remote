@@ -25,6 +25,7 @@ export * from './loopback.js'
 import { parseWireJson } from './wire-json.js'
 export { parseWireJson } from './wire-json.js'
 import { WORKSPACE_GIT_METHODS } from './workspace-git.js'
+import { DECK_PANEL_COMMENTS_METHODS } from './deck-panel-comments.js'
 import { DECK_PANEL_READ_METHODS } from './deck-panel-read.js'
 import { z } from 'zod'
 
@@ -220,6 +221,7 @@ export const rpcMethods = [
   ...sessionTransferMethods,
   ...WORKSPACE_GIT_METHODS,
   ...DECK_PANEL_READ_METHODS,
+  ...DECK_PANEL_COMMENTS_METHODS,
   'workspace.upload.lan.open',
   'workspace.upload.open',
   'workspace.upload.chunk',
@@ -1637,3 +1639,4 @@ function cryptoRandomId(): string {
 export * from './dsh-web.js'
 export * from './workspace-git.js'
 export * from './deck-panel-read.js'
+export * from './deck-panel-comments.js'

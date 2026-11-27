@@ -166,7 +166,7 @@ describe('deck panel read over the Remote relay', () => {
   it('exposes no other deck route or method through the relay', async () => {
     const { service, call, available, anythingElse } = deckService()
     const { router } = routerFor(() => service)
-    await runScenarios(['deck.panel.read.tree', 'deck.panel.read.ticket', 'deck.panel.write', 'deck.panel.comments', 'deck.call', 'deck.host.call', 'dsws.call'].map(method => ({
+    await runScenarios(['deck.panel.read.tree', 'deck.panel.read.ticket', 'deck.panel.write', 'deck.panel.comments.write', 'deck.call', 'deck.host.call', 'dsws.call'].map(method => ({
       name: method, run: async () => {
         const response = await router.handle({ v: 1, id: 'req-' + method, type: 'rpc.request', timestamp: Date.now(), payload: { method, params: { sessionId: 'sess-1' } } } as RemoteMessage)
         expect(response).toMatchObject({ type: 'rpc.error', payload: { code: 'METHOD_NOT_FOUND' } })

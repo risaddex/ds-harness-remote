@@ -8,6 +8,8 @@ import {
   LAN_UPLOAD_CAPABILITY,
   WORKSPACE_GIT_CAPABILITY,
   WORKSPACE_GIT_METHODS,
+  DECK_PANEL_COMMENTS_CAPABILITY,
+  DECK_PANEL_COMMENTS_METHODS,
   DECK_PANEL_READ_CAPABILITY,
   DECK_PANEL_READ_METHODS,
   createRpcError,
@@ -31,32 +33,25 @@ import type { CodexPeerBridge } from './codex/peer-bridge.js'
 import type { AcpPeerBridge } from './acp/peer-bridge.js'
 import { RpcError, safeErrorCode, workspaceFileFailureReason } from './safe-error.js'
 import type { WorkspaceGitHost } from './workspace-git.js'
+import type { DeckPanelCommentsHost } from './deck-panel-comments.js'
 import type { DeckPanelReadHost } from './deck-panel-read.js'
 import type { WorkspaceUploadHost } from './workspace-upload.js'
 import type { PluginRouteBridge } from './plugin-route-bridge.js'
-import type { RemoteCompactionOperations, RemoteCompactionOwner } from './remote-compaction-operations.js'
+import { dispatchCompactionRpc, type RemoteCompactionRoute } from './rpc-compaction.js'
 
 import type { SessionTransferPeer } from './session-transfer.js'
 
 export { RpcError } from './safe-error.js'
+export type { RemoteCompactionRoute } from './rpc-compaction.js'
 
 const wireRequestSchema = z.object({ method: z.string().min(1), params: z.unknown() }).strict()
 const emptyParamsSchema = z.object({}).strict()
 const historyConfigureSchema = z.object({ compact: z.boolean() }).strict()
-const compactionSessionSchema = z.string().min(1).max(128)
-const compactionSubmitSchema = z.object({
-  sessionId: compactionSessionSchema,
-  requestId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/),
-  budgetMs: z.number().int().min(60_000).max(7_200_000).optional(),
-}).strict()
-const compactionOperationSchema = z.object({
-  sessionId: compactionSessionSchema,
-  operationId: z.string().uuid(),
-}).strict()
 const apiMethods = new Set([
   ...sessionTransferMethods,
   ...WORKSPACE_GIT_METHODS,
   ...DECK_PANEL_READ_METHODS,
+  ...DECK_PANEL_COMMENTS_METHODS,
   'harness.transport.describe',
   'dsh.web.open',
   'dsh.web.close',
@@ -119,12 +114,6 @@ export const HOST_CAPABILITIES = [
   'agent.acp.transfer.v1',
 ] as const
 
-/** Per-connection view of the Host-wide async compaction registry. */
-export interface RemoteCompactionRoute {
-  operations: RemoteCompactionOperations
-  owner: RemoteCompactionOwner
-}
-
 export class RpcRouter {
   private active = 0
 
@@ -149,6 +138,7 @@ export class RpcRouter {
     private readonly sameLinkIpv6Endpoints?: AuthenticatedPeerChannel['sameLinkIpv6Endpoints'],
     private readonly workspaceGit?: WorkspaceGitHost,
     private readonly deckPanelRead?: DeckPanelReadHost,
+    private readonly deckPanelComments?: DeckPanelCommentsHost,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -235,13 +225,18 @@ export class RpcRouter {
         const { sameLinkIpv6Pair } = z.object({ sameLinkIpv6Pair: sameLinkIpv6PairSchema.optional() }).strict().parse(params)
         const hostCapabilities = (await this.capabilities()).filter(capability => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY)
         const remoteAvailable = hostCapabilities.includes('harness.remote.v1') || hostCapabilities.includes('harness.remote.v3')
+        // Start both probes together without adding a wait to the legacy path.
+        const deckCommentsProbe = this.deckPanelComments?.available()
+        const deckReadAvailable = await this.deckPanelRead?.available()
+        const deckCommentsAvailable = deckCommentsProbe !== undefined && await deckCommentsProbe
         const capabilities = [...new Set([...hostCapabilities, 'remote.history.compact.v1',
           ...(this.harnessRemote === undefined || !remoteAvailable ? [] : ['harness.remote.stream.transfer.v1']),
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
           ...(this.workspaceGit === undefined ? [] : [WORKSPACE_GIT_CAPABILITY]),
           // Asked on every negotiation, never cached: the deck publishes its service after start-up and can go away.
-          ...(await this.deckPanelRead?.available() === true ? [DECK_PANEL_READ_CAPABILITY] : []),
+          ...(deckReadAvailable === true ? [DECK_PANEL_READ_CAPABILITY] : []),
+          ...(deckCommentsAvailable === true ? [DECK_PANEL_COMMENTS_CAPABILITY] : []),
           ...(this.sessionTransfer?.capabilities() ?? []),
           ...(this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : []),
           ...(this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === 'linux' ? [DSH_WEB_LAN_IPV6_CAPABILITY] : []),
@@ -273,18 +268,9 @@ export class RpcRouter {
         }
         return { compact }
       }
-      case 'harness.remote.compaction.submit': {
-        const route = this.requireCompaction()
-        return route.operations.submit(compactionSubmitSchema.parse(params), route.owner)
-      }
-      case 'harness.remote.compaction.status': {
-        const route = this.requireCompaction()
-        return route.operations.status(compactionOperationSchema.parse(params), route.owner)
-      }
-      case 'harness.remote.compaction.cancel': {
-        const route = this.requireCompaction()
-        return route.operations.cancel(compactionOperationSchema.parse(params), route.owner)
-      }
+      case 'harness.remote.compaction.submit':
+      case 'harness.remote.compaction.status':
+      case 'harness.remote.compaction.cancel': return dispatchCompactionRpc(method, params, this.compaction)
       case 'harness.remote.call': return this.requireRemoteGateway().call(params)
       case 'harness.remote.transfer.open': return this.requireRemoteGateway().openTransfer(params)
       case 'harness.remote.transfer.chunk': return this.requireRemoteGateway().appendTransfer(params)
@@ -341,6 +327,10 @@ export class RpcRouter {
         if (!this.workspaceGit) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Workspace Git is unavailable on this Host.')
         return this.workspaceGit.diff(params)
       }
+      case 'deck.panel.comments': {
+        if (!this.deckPanelComments) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Deck comments are unavailable on this Host.')
+        return this.deckPanelComments.list(params)
+      }
       case 'deck.panel.read': {
         if (!this.deckPanelRead) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Deck panel read is unavailable on this Host.')
         return this.deckPanelRead.call(params)
@@ -358,13 +348,6 @@ export class RpcRouter {
         }
         throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }
-  }
-
-  private requireCompaction(): RemoteCompactionRoute {
-    if (this.compaction === undefined) {
-      throw new RpcError('FEATURE_NOT_SUPPORTED', 'This Host does not provide asynchronous Remote compaction.')
-    }
-    return this.compaction
   }
 
   private requireRemoteGateway(): HarnessRemoteBridge {
