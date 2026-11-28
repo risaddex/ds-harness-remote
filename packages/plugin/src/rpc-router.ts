@@ -144,9 +144,9 @@ export class RpcRouter {
     private readonly lanWeb?: DshWebLanPeer,
     private readonly sameLinkIpv6Endpoints?: AuthenticatedPeerChannel['sameLinkIpv6Endpoints'],
     private readonly workspaceGit?: WorkspaceGitHost,
+    private readonly attention?: AttentionPeerRoute,
     private readonly deckPanelRead?: DeckPanelReadHost,
     private readonly deckPanelComments?: DeckPanelCommentsHost,
-    private readonly attention?: AttentionPeerRoute,
   ) {}
 
   async closePeerStreams(): Promise<void> {

@@ -28,7 +28,7 @@ function routerFor(resolve: () => DeckPanelReadServiceLike | undefined, options?
   const host = new DeckPanelReadHost(resolve, authority, logger, options)
   const router = new RpcRouter(
     undefined, logger, undefined, undefined, () => ['transport.relay', 'harness.remote.v1'], undefined, undefined, undefined,
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, host,
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, host,
   )
   return { router, logger }
 }

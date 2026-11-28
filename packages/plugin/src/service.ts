@@ -296,12 +296,12 @@ export class HostPluginRuntime {
           ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : undefined,
         context.sameLinkIpv6Endpoints,
         workspaceGit,
-        new DeckPanelReadHost(() => this.deckPanelRead?.(), sessionAuthority, this.logger),
-        this.deckPanelComments && new DeckPanelCommentsHost(this.deckPanelComments, sessionAuthority),
         this.attention.createPeerRoute(
           context.connectionId,
           event => send(createEvent('attention.follow.event', event)),
         ),
+        new DeckPanelReadHost(() => this.deckPanelRead?.(), sessionAuthority, this.logger),
+        this.deckPanelComments && new DeckPanelCommentsHost(this.deckPanelComments, sessionAuthority),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

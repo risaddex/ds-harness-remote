@@ -11553,19 +11553,19 @@ var init_lib = __esm({
         }
         return fragments;
       }
-      static assemble(messages) {
-        if (!messages?.length) {
+      static assemble(messages2) {
+        if (!messages2?.length) {
           throw new Error("cannot reassemble handshake from empty array");
         }
-        messages = messages.sort((a, b) => a.fragment_offset - b.fragment_offset);
-        const combined = Buffer.alloc(messages[0].length);
-        for (const msg of messages) {
+        messages2 = messages2.sort((a, b) => a.fragment_offset - b.fragment_offset);
+        const combined = Buffer.alloc(messages2[0].length);
+        for (const msg of messages2) {
           msg.fragment.copy(combined, msg.fragment_offset);
         }
         return new _FragmentedHandshake(
-          messages[0].msg_type,
-          messages[0].length,
-          messages[0].message_seq,
+          messages2[0].msg_type,
+          messages2[0].length,
+          messages2[0].message_seq,
           0,
           combined.length,
           combined
@@ -15641,14 +15641,14 @@ var init_lib = __esm({
           return void 0;
         }
         const frameIndex = stallPolicy === "delay" ? nextFrameIndex : latest;
-        const deadline = this.deadline(anchor2, frameIndex);
+        const deadline2 = this.deadline(anchor2, frameIndex);
         return {
           frameIndex,
           timestamp: this.timestamp(frameIndex),
           elapsedSamples: this.elapsedSamples(frameIndex) - this.elapsedSamples(lastFrameIndex ?? baseFrameIndex),
           skippedFrames: frameIndex - (lastFrameIndex !== void 0 ? lastFrameIndex + 1 : baseFrameIndex),
-          deadline,
-          lateness: now - deadline
+          deadline: deadline2,
+          lateness: now - deadline2
         };
       }
     };
@@ -15948,8 +15948,8 @@ var init_lib = __esm({
           return;
         }
         const now = this.now();
-        const deadline = this.deadline(entry.dts);
-        if (now < deadline - SLOT_EPSILON) {
+        const deadline2 = this.deadline(entry.dts);
+        if (now < deadline2 - SLOT_EPSILON) {
           this.scheduleNext(now);
           return;
         }
@@ -15964,8 +15964,8 @@ var init_lib = __esm({
           ),
           pts: entry.pts,
           dts: entry.dts,
-          deadline,
-          lateness: now - deadline,
+          deadline: deadline2,
+          lateness: now - deadline2,
           delay: 0
         };
         if (stalled) {
@@ -16950,15 +16950,15 @@ var init_lib = __esm({
         this.dtls.flight = 5;
         const needCertificate = this.dtls.requestedCertificateTypes.length > 0;
         log10(this.dtls.sessionId, "send flight5", needCertificate);
-        const messages = [
+        const messages2 = [
           needCertificate && this.sendCertificate(),
           this.sendClientKeyExchange(),
           needCertificate && this.sendCertificateVerify(),
           this.sendChangeCipherSpec(),
           this.sendFinished()
         ].filter((v) => v);
-        this.dtls.lastMessage = messages;
-        await this.transmit(messages);
+        this.dtls.lastMessage = messages2;
+        await this.transmit(messages2);
       }
       sendCertificate() {
         const certificate = new Certificate([Buffer.from(this.cipher.localCert)]);
@@ -17616,8 +17616,8 @@ var init_lib = __esm({
         const packets = parsePacket(data2);
         for (const packet of packets) {
           try {
-            const messages = parsePlainText(this.dtls, this.cipher)(packet);
-            for (const message of messages) {
+            const messages2 = parsePlainText(this.dtls, this.cipher)(packet);
+            for (const message of messages2) {
               switch (message.type) {
                 case 22:
                   {
@@ -17695,8 +17695,8 @@ var init_lib = __esm({
         }
         f("waitForReady timeout");
       });
-      handleFragmentHandshake(messages) {
-        let handshakes = messages.filter((v) => {
+      handleFragmentHandshake(messages2) {
+        let handshakes = messages2.filter((v) => {
           if (v.fragment_length !== v.length) {
             this.bufferFragmentedHandshakes.push(v);
             return false;
@@ -17976,15 +17976,15 @@ var init_lib = __esm({
         this.dtls.flight = 4;
         this.dtls.sequenceNumber = 1;
         this.dtls.bufferHandshakeCache([handshake], false, 4);
-        const messages = [
+        const messages2 = [
           this.sendServerHello(),
           this.sendCertificate(),
           this.sendServerKeyExchange(),
           certificateRequest && this.sendCertificateRequest(),
           this.sendServerHelloDone()
         ].filter((v) => v);
-        this.dtls.lastMessage = messages;
-        await this.transmit(messages);
+        this.dtls.lastMessage = messages2;
+        await this.transmit(messages2);
       }
       sendServerHello() {
         const extensions = [];
@@ -18088,9 +18088,9 @@ var init_lib = __esm({
           return;
         }
         this.dtls.flight = 6;
-        const messages = [this.sendChangeCipherSpec(), this.sendFinished()];
-        this.dtls.lastMessage = messages;
-        await this.transmit(messages);
+        const messages2 = [this.sendChangeCipherSpec(), this.sendFinished()];
+        this.dtls.lastMessage = messages2;
+        await this.transmit(messages2);
       }
       sendChangeCipherSpec() {
         const changeCipherSpec = ChangeCipherSpec.createEmpty().serialize();
@@ -64949,6 +64949,55 @@ var workspaceGitDiffResultSchema = external_exports.object({
   truncatedReason: external_exports.enum(["max-bytes", "max-lines"]).optional()
 }).strict();
 
+// packages/protocol/dist/deck-panel-read.js
+var DECK_PANEL_READ_CAPABILITY = "deck.panel.read.v1";
+var DECK_PANEL_READ_METHODS = ["deck.panel.read"];
+var DECK_PANEL_READ_OPERATIONS = ["tree", "ticket"];
+var DECK_PANEL_READ_MAX_SESSION_ID_CHARS = 512;
+var DECK_PANEL_READ_MAX_TICKET_KEY_CHARS = 200;
+var DECK_PANEL_READ_MAX_REPLY_BYTES = 512 * 1024;
+var DECK_PANEL_READ_TIMEOUT_MS = 3e4;
+var DECK_PANEL_READ_PROBE_TIMEOUT_MS = 5e3;
+var deckPanelSessionIdSchema = external_exports.string().max(DECK_PANEL_READ_MAX_SESSION_ID_CHARS).refine((value) => value.trim() !== "", "sessionId must not be blank");
+var deckPanelTicketKeySchema = external_exports.union([
+  external_exports.string().max(DECK_PANEL_READ_MAX_TICKET_KEY_CHARS).refine((value) => value.trim() !== "", "key must not be blank"),
+  external_exports.number().refine((value) => Number.isSafeInteger(value) && value > 0, "key must be a positive safe integer")
+]);
+var deckPanelReadParamsSchema = external_exports.discriminatedUnion("operation", [
+  external_exports.object({ operation: external_exports.literal("tree"), sessionId: deckPanelSessionIdSchema }).strict(),
+  external_exports.object({ operation: external_exports.literal("ticket"), sessionId: deckPanelSessionIdSchema, key: deckPanelTicketKeySchema }).strict()
+]);
+var deckPanelReadFailureSchema = external_exports.object({
+  ok: external_exports.literal(false),
+  error: external_exports.object({ kind: external_exports.string().min(1).max(40), message: external_exports.string().min(1).max(200) }).strict()
+}).strict();
+
+// packages/protocol/dist/deck-panel-comments.js
+var DECK_PANEL_COMMENTS_CAPABILITY = "deck.panel.comments.v1";
+var DECK_PANEL_COMMENTS_METHODS = ["deck.panel.comments"];
+var DECK_PANEL_COMMENTS_MAX_PAGE = 50;
+var cursorSchema = external_exports.string().max(200).refine((value) => value.trim() !== "", "cursor must not be blank");
+var deckPanelCommentsParamsSchema = external_exports.object({
+  sessionId: deckPanelSessionIdSchema,
+  key: deckPanelTicketKeySchema,
+  cursor: cursorSchema.optional()
+}).strict();
+var deckPanelCommentSchema = external_exports.object({
+  body: external_exports.string(),
+  author: external_exports.string().optional(),
+  createdAt: external_exports.string().optional(),
+  updatedAt: external_exports.string().optional()
+}).strict();
+var deckPanelCommentsSuccessSchema = external_exports.object({
+  ok: external_exports.literal(true),
+  sessionId: deckPanelSessionIdSchema,
+  key: deckPanelTicketKeySchema,
+  comments: external_exports.array(deckPanelCommentSchema).max(DECK_PANEL_COMMENTS_MAX_PAGE),
+  nextCursor: cursorSchema.optional(),
+  truncated: external_exports.boolean().optional()
+}).strict().refine((page) => page.truncated !== true || page.nextCursor === void 0, "a truncated page must be terminal");
+var deckPanelCommentsReplySchema = external_exports.discriminatedUnion("ok", [deckPanelCommentsSuccessSchema, deckPanelReadFailureSchema]);
+
 // packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
@@ -65103,6 +65152,8 @@ var rpcMethods = [
   ...sessionTransferMethods,
   ...attentionRpcMethods,
   ...WORKSPACE_GIT_METHODS,
+  ...DECK_PANEL_READ_METHODS,
+  ...DECK_PANEL_COMMENTS_METHODS,
   "workspace.upload.lan.open",
   "workspace.upload.open",
   "workspace.upload.chunk",
@@ -68850,8 +68901,8 @@ function messagePatternHasPsk(m) {
     /* Token.Psk */
   ));
 }
-function validatePqTokenOrderRule(messages) {
-  for (const message of messages) {
+function validatePqTokenOrderRule(messages2) {
+  for (const message of messages2) {
     let skemSeen = false;
     let publicKeySeen = false;
     for (const token of message) {
@@ -68870,9 +68921,9 @@ function validatePqTokenOrderRule(messages) {
     }
   }
 }
-function validatePskRule(messages) {
+function validatePskRule(messages2) {
   let pskSent = false;
-  for (const message of messages) {
+  for (const message of messages2) {
     for (const token of message) {
       if (token === 8) {
         pskSent = true;
@@ -73810,8 +73861,8 @@ async function assertRefreshQueueIdle(directory) {
 }
 async function withQueueLock(lock, operation) {
   await mkdir(dirname(lock), { recursive: true, mode: 448 });
-  const deadline = Date.now() + 15e3;
-  await ensureQueueMarker(lock, deadline);
+  const deadline2 = Date.now() + 15e3;
+  await ensureQueueMarker(lock, deadline2);
   const id7 = `${process.pid}-${uuidV7()}`;
   const holder = `${lock}.holder-${id7}`;
   await publishExclusive(holder, `${id7} choosing
@@ -73825,7 +73876,7 @@ async function withQueueLock(lock, operation) {
       const entries = await participants(lock);
       const preceding = entries.some((entry) => entry.id !== id7 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id7));
       if (!preceding) break;
-      if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
+      if (Date.now() >= deadline2) throw new ServerCredentialsBusyError();
       await new Promise((resolve11) => setTimeout(resolve11, 50));
     }
     return await operation();
@@ -73855,7 +73906,7 @@ var ServerCredentialsLockDirectoryError = class extends Error {
   }
 };
 var SERVER_CREDENTIALS_QUEUE_MARKER = "DSH_REFRESH_LOCK_V2\n";
-async function ensureQueueMarker(lock, deadline) {
+async function ensureQueueMarker(lock, deadline2) {
   for (; ; ) {
     try {
       await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER);
@@ -73867,7 +73918,7 @@ async function ensureQueueMarker(lock, deadline) {
       }
       if (!await isLockContention(error62, lock)) throw error62;
       if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return;
-      if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
+      if (Date.now() >= deadline2) throw new ServerCredentialsBusyError();
       await new Promise((resolve11) => setTimeout(resolve11, 50));
     }
   }
@@ -74315,10 +74366,10 @@ Schema.prototype.push = function push(value) {
   this.list.push(value);
   return this;
 };
-function mergeDesc(original, messages) {
+function mergeDesc(original, messages2) {
   const result = typeof original === "string" ? { "": original } : { ...original };
-  for (const locale in messages) {
-    const value = messages[locale];
+  for (const locale in messages2) {
+    const value = messages2[locale];
     if (value?.$description || value?.$desc) result[locale] = value.$description || value.$desc;
     else if (typeof value === "string") result[locale] = value;
   }
@@ -74330,25 +74381,25 @@ function getInner(value) {
 function extractKeys(data2) {
   return filterKeys(data2 ?? {}, (key) => !key.startsWith("$"));
 }
-Schema.prototype.i18n = function i18n(messages) {
+Schema.prototype.i18n = function i18n(messages2) {
   const schema = Schema(this);
-  const desc = mergeDesc(schema.meta.description, messages);
+  const desc = mergeDesc(schema.meta.description, messages2);
   if (Object.keys(desc).length) schema.meta.description = desc;
   if (schema.dict) schema.dict = mapValues(schema.dict, (inner, key) => {
-    return inner.i18n(mapValues(messages, (data2) => getInner(data2)?.[key] ?? data2?.[key]));
+    return inner.i18n(mapValues(messages2, (data2) => getInner(data2)?.[key] ?? data2?.[key]));
   });
   if (schema.list) schema.list = schema.list.map((inner, index) => {
-    return inner.i18n(mapValues(messages, (data2 = {}) => {
+    return inner.i18n(mapValues(messages2, (data2 = {}) => {
       if (Array.isArray(getInner(data2))) return getInner(data2)[index];
       if (Array.isArray(data2)) return data2[index];
       return extractKeys(data2);
     }));
   });
-  if (schema.inner) schema.inner = schema.inner.i18n(mapValues(messages, (data2) => {
+  if (schema.inner) schema.inner = schema.inner.i18n(mapValues(messages2, (data2) => {
     if (getInner(data2)) return getInner(data2);
     return extractKeys(data2);
   }));
-  if (schema.sKey) schema.sKey = schema.sKey.i18n(mapValues(messages, (data2) => data2?.$key));
+  if (schema.sKey) schema.sKey = schema.sKey.i18n(mapValues(messages2, (data2) => data2?.$key));
   return schema;
 };
 Schema.prototype.extra = function extra(key, value) {
@@ -74758,11 +74809,11 @@ Schema.extend("object", (data2, { dict }, options, strict) => {
   return [result];
 });
 Schema.extend("union", (data2, { list: list2, toString: toString2 }, options, strict) => {
-  const messages = [];
+  const messages2 = [];
   for (const inner of list2) try {
     return Schema.resolve(data2, inner, options, strict);
   } catch (error62) {
-    messages.push(error62);
+    messages2.push(error62);
   }
   throw new ValidationError(`expected ${toString2()} but got ${JSON.stringify(data2)}`, options);
 });
@@ -77559,9 +77610,9 @@ var DirectPreferredRace = class {
     this.started.add(attempt);
     if (attempt === "direct")
       this.startWindow();
-    const deadline = Date.now() + timeoutMs;
-    if (deadline > this.deadlineAt) {
-      this.deadlineAt = deadline;
+    const deadline2 = Date.now() + timeoutMs;
+    if (deadline2 > this.deadlineAt) {
+      this.deadlineAt = deadline2;
       clearTimeout(this.deadlineTimer);
       this.armDeadline(timeoutMs);
     }
@@ -79155,9 +79206,9 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "connect.rejected" || frame.type === "error") {
         const payload = frame.payload;
         const message = typeof payload.message === "string" ? payload.message : "Server rejected the connection";
-        const failure5 = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
+        const failure6 = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
         const code = errorCodeSchema.safeParse(payload.code);
-        this.failConnection(failure5, {
+        this.failConnection(failure6, {
           reason: payload.retryable === true ? "control-error" : "invalid-control-frame",
           ...code.success ? { errorCode: code.data } : {}
         });
@@ -79200,11 +79251,11 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "ping")
         this.sendControl("pong", frame.payload);
     } catch (error62) {
-      const failure5 = error62 instanceof Error ? error62 : new Error("Invalid adaptive control frame");
-      if (!("code" in failure5))
-        Object.assign(failure5, { code: "INVALID_MESSAGE" });
-      const code = errorCodeSchema.safeParse(failure5.code);
-      this.failConnection(failure5, { reason: "invalid-control-frame", ...code.success ? { errorCode: code.data } : {} });
+      const failure6 = error62 instanceof Error ? error62 : new Error("Invalid adaptive control frame");
+      if (!("code" in failure6))
+        Object.assign(failure6, { code: "INVALID_MESSAGE" });
+      const code = errorCodeSchema.safeParse(failure6.code);
+      this.failConnection(failure6, { reason: "invalid-control-frame", ...code.success ? { errorCode: code.data } : {} });
     }
   }
   handleRelay(payload) {
@@ -80882,13 +80933,13 @@ function selectMessageLimitCutIndex(window2, maxMessages, countSurfaceMessages) 
   if (!countSurfaceMessages) {
     return Math.max(0, window2.length - maxMessages);
   }
-  let messages = 0;
+  let messages2 = 0;
   let cutSeq = -Infinity;
   for (let index = window2.length - 1; index >= 0; index -= 1) {
     const entry = window2[index];
     if (!isSurfaceAppendEvent(entry)) continue;
-    messages += 1;
-    if (messages >= maxMessages) {
+    messages2 += 1;
+    if (messages2 >= maxMessages) {
       cutSeq = Math.min(entry.event.seq, ...entry.event.sourceEventSeqs ?? []);
       break;
     }
@@ -82278,7 +82329,7 @@ var AcpSessionTitles = class {
     const controller = new AbortController();
     const signal = controller.signal;
     this.pending.set(session2.sessionId, controller);
-    const deadline = this.backend === "opencode" ? setTimeout(() => controller.abort(), 2e4) : void 0;
+    const deadline2 = this.backend === "opencode" ? setTimeout(() => controller.abort(), 2e4) : void 0;
     try {
       for (const delay of this.backend === "opencode" ? [0, 1e3, 3e3, 6e3, 9e3] : [0]) {
         if (delay) await waitForTitle(delay, signal);
@@ -82296,7 +82347,7 @@ var AcpSessionTitles = class {
         }
       }
     } finally {
-      if (deadline !== void 0) clearTimeout(deadline);
+      if (deadline2 !== void 0) clearTimeout(deadline2);
       if (this.pending.get(session2.sessionId) === controller) this.pending.delete(session2.sessionId);
     }
   }
@@ -84398,9 +84449,9 @@ var ClientConnection = class {
       };
     } catch (error62) {
       this.clearConnectionProgress(progressRunId);
-      const failure5 = closed && closeError !== void 0 ? closeError : error62;
+      const failure6 = closed && closeError !== void 0 ? closeError : error62;
       await client?.close().catch(() => void 0);
-      throw failure5;
+      throw failure6;
     } finally {
       signal?.removeEventListener("abort", onAbort);
     }
@@ -84494,8 +84545,8 @@ var ClientReconnect = class {
 };
 function canReconnect(error62) {
   if (typeof error62 !== "object" || error62 === null) return true;
-  const failure5 = error62;
-  if (failure5.code !== void 0 && ![
+  const failure6 = error62;
+  if (failure6.code !== void 0 && ![
     "HOST_OFFLINE",
     "CONNECTION_FAILED",
     "CONNECTION_NOT_FOUND",
@@ -84507,8 +84558,8 @@ function canReconnect(error62) {
     "RATE_LIMITED",
     "SLOW_CONSUMER",
     "INTERNAL_ERROR"
-  ].includes(String(failure5.code))) return false;
-  return failure5.retryable !== false;
+  ].includes(String(failure6.code))) return false;
+  return failure6.retryable !== false;
 }
 
 // packages/plugin/src/acp/method-policy.ts
@@ -84820,16 +84871,16 @@ var LoopbackHost = class {
             };
           });
           let bytes = 0;
-          const messages = [];
+          const messages2 = [];
           while (handle.messages.length > 0 && bytes < LOOPBACK_MAX_WS_BYTES) {
             const message = handle.messages.shift();
             bytes += message.data.length;
-            messages.push(message);
+            messages2.push(message);
           }
           handle.bytes -= bytes;
           const closed = handle.closed && handle.messages.length === 0;
           if (closed) this.close(value.id, handle);
-          return { messages, closed };
+          return { messages: messages2, closed };
         } finally {
           handle.reading = false;
         }
@@ -89701,11 +89752,11 @@ function routeStreamEvent(event2, streamId, queue) {
   const data2 = event2.data;
   if (data2.streamId !== streamId) return;
   if (data2.reason === "failed") {
-    const failure5 = data2.failure;
+    const failure6 = data2.failure;
     queue.fail(remoteFailure({
-      code: typeof failure5?.code === "string" ? failure5.code : "internal",
-      message: typeof failure5?.message === "string" ? failure5.message : "The remote Harness stream failed.",
-      details: isRecord9(failure5?.details) ? failure5.details : {}
+      code: typeof failure6?.code === "string" ? failure6.code : "internal",
+      message: typeof failure6?.message === "string" ? failure6.message : "The remote Harness stream failed.",
+      details: isRecord9(failure6?.details) ? failure6.details : {}
     }));
   } else {
     queue.close();
@@ -89722,11 +89773,11 @@ function parseRpcResult(value) {
     error: { code: value.error.code, message: value.error.message, details: value.error.details }
   };
 }
-function remoteFailure(failure5) {
-  return Object.assign(new Error(failure5.message), {
+function remoteFailure(failure6) {
+  return Object.assign(new Error(failure6.message), {
     isDSHRemoteError: true,
-    code: failure5.code,
-    details: failure5.details
+    code: failure6.code,
+    details: failure6.details
   });
 }
 function bytesToBase642(bytes) {
@@ -92486,8 +92537,8 @@ var ClientModeRuntime = class {
       }));
       signal.throwIfAborted();
       this.assertHostAuthorizationForDeviceDiscovery();
-      const failure5 = workers.find((result) => result.status === "rejected");
-      if (failure5?.status === "rejected") throw failure5.reason;
+      const failure6 = workers.find((result) => result.status === "rejected");
+      if (failure6?.status === "rejected") throw failure6.reason;
       devices.push(...resolved);
     }
     signal.throwIfAborted();
@@ -92560,8 +92611,8 @@ var ClientModeRuntime = class {
       this.identity = await this.identities.reset(this.config.deviceName);
       this.server.bindIdentity(this.identity);
     }
-    const failure5 = results.find((result) => result.status === "rejected");
-    if (failure5?.status === "rejected") throw failure5.reason;
+    const failure6 = results.find((result) => result.status === "rejected");
+    if (failure6?.status === "rejected") throw failure6.reason;
   }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
@@ -92951,8 +93002,8 @@ var ClientModeRuntime = class {
       this.codexStreamBridge.closeCodexStreams(previous?.client),
       previous?.client.close()
     ]);
-    const failure5 = results.find((result) => result.status === "rejected");
-    if (failure5?.status === "rejected") throw failure5.reason;
+    const failure6 = results.find((result) => result.status === "rejected");
+    if (failure6?.status === "rejected") throw failure6.reason;
   }
   async callRemoteFileViewer(endpoint, payload, signal) {
     const remote = this.connected;
@@ -94087,7 +94138,7 @@ var LOCK_RETRY_INITIAL_MS = 20;
 var LOCK_RETRY_MAX_MS = 200;
 async function withIdentityLock(directory, operation) {
   const lockPath = join5(directory, LOCK_FILE_NAME);
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const deadline2 = Date.now() + LOCK_TIMEOUT_MS;
   let delay = LOCK_RETRY_INITIAL_MS;
   for (; ; ) {
     try {
@@ -94098,7 +94149,7 @@ async function withIdentityLock(directory, operation) {
       if (!await isLockContention2(error62, lockPath)) throw error62;
       if (await takeOverLockOfExitedOwner(lockPath)) continue;
     }
-    if (Date.now() >= deadline) {
+    if (Date.now() >= deadline2) {
       throw new IdentityInvalidError(
         "device identity is locked by another process; stop other DSH instances and retry",
         "IDENTITY_LOCKED"
@@ -95052,14 +95103,14 @@ var HostAttentionTracker = class {
           }
         } catch (error62) {
           if (this.closed || controller.signal.aborted) break;
-          const failure5 = gateway.failure(error62);
+          const failure6 = gateway.failure(error62);
           this.options.logger?.debug("harness attention observer degraded", {
-            code: failure5.code,
+            code: failure6.code,
             attempt
           });
-          if (TERMINAL_OBSERVER_ERROR_CODES.has(failure5.code)) {
+          if (TERMINAL_OBSERVER_ERROR_CODES.has(failure6.code)) {
             terminal = true;
-          } else if (failure5.code === "gateway/service-unavailable" && attempt >= this.observerBackoffMs.length) {
+          } else if (failure6.code === "gateway/service-unavailable" && attempt >= this.observerBackoffMs.length) {
             terminal = true;
           }
         } finally {
@@ -100238,9 +100289,9 @@ var AcpHistoryAccumulator = class {
     return true;
   }
 };
-function acpHistoryEvents(messages, sessionId, provider) {
+function acpHistoryEvents(messages2, sessionId, provider) {
   const accumulator = new AcpHistoryAccumulator(sessionId, provider);
-  for (const message of messages) accumulator.push(message);
+  for (const message of messages2) accumulator.push(message);
   return accumulator.finish().events;
 }
 
@@ -106159,8 +106210,8 @@ var AcpRemoteGateway = class {
       if (this.pendingReconfiguration.size === 0) this.unavailableCode = void 0;
       return;
     }
-    const failure5 = results.find((result) => result.status === "rejected");
-    throw failure5?.status === "rejected" ? failure5.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
+    const failure6 = results.find((result) => result.status === "rejected");
+    throw failure6?.status === "rejected" ? failure6.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
   }
   /**
    * Launch one backend at most once at a time. A retry and a `start()` (from a
@@ -108103,8 +108154,8 @@ var PluginControlRuntime = class {
       await store.clear();
       if (role2 === "host" && this.host === void 0) await store.clearPairingArtifacts();
     }));
-    const failure5 = [...runtimes, ...stores].find((result) => result.status === "rejected");
-    if (failure5?.status === "rejected") throw failure5.reason;
+    const failure6 = [...runtimes, ...stores].find((result) => result.status === "rejected");
+    if (failure6?.status === "rejected") throw failure6.reason;
     if (this.client !== void 0 && !this.host?.hostStatus?.()?.pairingHostOnly) {
       await this.client.syncIdentityIfStarted?.();
     }
@@ -111277,6 +111328,243 @@ function countUnifiedDiffChanges(lines) {
   return { additions, deletions };
 }
 
+// packages/plugin/src/deck-panel-comments.ts
+var messages = {
+  "bad-request": "The deck comments request is invalid.",
+  "unavailable": "Deck comments are not available on this Host.",
+  "session": "The session is not available on this Host.",
+  "timeout": "The deck comments read did not finish in time.",
+  "read-failed": "The deck comments read failed.",
+  "bad-reply": "The deck comments read returned an invalid reply.",
+  "oversized": "The deck comments reply is too large for this channel."
+};
+function failure4(kind) {
+  return { ok: false, error: { kind, message: messages[kind] } };
+}
+var DeckPanelCommentsHost = class {
+  constructor(resolveService, resolveSession) {
+    this.resolveService = resolveService;
+    this.resolveSession = resolveSession;
+  }
+  async available() {
+    try {
+      return await deadline(DECK_PANEL_READ_PROBE_TIMEOUT_MS, false, async () => {
+        const answer = await this.service()?.available();
+        return typeof answer === "object" && answer !== null && "available" in answer && answer.available === true;
+      });
+    } catch {
+      return false;
+    }
+  }
+  async list(input4) {
+    const request2 = deckPanelCommentsParamsSchema.safeParse(input4);
+    if (!request2.success) return failure4("bad-request");
+    const service = this.service();
+    if (service === void 0) return failure4("unavailable");
+    const { sessionId, key } = request2.data;
+    return deadline(DECK_PANEL_READ_TIMEOUT_MS, failure4("timeout"), async (signal) => {
+      try {
+        const workspace2 = await this.resolveSession(sessionId.trim(), signal);
+        if (typeof workspace2 !== "string" || workspace2 === "") return failure4("session");
+      } catch {
+        return failure4("session");
+      }
+      if (signal.aborted) return failure4("timeout");
+      let text;
+      try {
+        const reply = await service.list(request2.data);
+        try {
+          text = JSON.stringify(reply);
+        } catch {
+          return failure4("bad-reply");
+        }
+      } catch {
+        return failure4("read-failed");
+      }
+      if (text === void 0) return failure4("bad-reply");
+      if (Buffer.byteLength(text, "utf8") > DECK_PANEL_READ_MAX_REPLY_BYTES) return failure4("oversized");
+      const result = deckPanelCommentsReplySchema.safeParse(JSON.parse(text));
+      if (!result.success) return failure4("bad-reply");
+      if (result.data.ok === true) {
+        return result.data.sessionId === sessionId.trim() && result.data.key === key ? result.data : failure4("bad-reply");
+      }
+      const { kind } = result.data.error;
+      if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(kind)) return failure4("read-failed");
+      return { ok: false, error: { kind, message: messages["read-failed"] } };
+    });
+  }
+  service() {
+    try {
+      const service = this.resolveService();
+      if (service?.feature === DECK_PANEL_COMMENTS_CAPABILITY && typeof service.list === "function" && typeof service.available === "function") return service;
+    } catch {
+    }
+    return void 0;
+  }
+};
+async function deadline(ms, expired, run2) {
+  const controller = new AbortController();
+  let timer2;
+  const timeout = new Promise((resolve11) => {
+    timer2 = setTimeout(() => resolve11(expired), ms);
+  });
+  try {
+    return await Promise.race([run2(controller.signal), timeout]);
+  } finally {
+    if (timer2 !== void 0) clearTimeout(timer2);
+    controller.abort();
+  }
+}
+
+// packages/plugin/src/deck-panel-read.ts
+var HOST_FAILURE_MESSAGES = {
+  "operation-not-allowed": "Only the deck tree read and the deck ticket read are available over this channel.",
+  "bad-request": "The request does not have the shape this read takes.",
+  unavailable: "The deck read channel is not available on this host.",
+  session: "The session is not available on this host.",
+  timeout: "The deck read did not finish in time.",
+  "read-failed": "The deck read failed.",
+  "bad-reply": "The deck read returned a reply that could not be understood.",
+  oversized: "The deck read reply is too large for this channel."
+};
+var SAFE_DECK_KIND = /^[a-z0-9][a-z0-9-]{0,39}$/;
+var SAFE_DECK_MESSAGE = /^[A-Za-z0-9 .,()'-]{1,200}$/;
+var TIMED_OUT = Symbol("deck-panel-read-timed-out");
+var DeckPanelReadHost = class {
+  constructor(resolveService, resolveSession, logger2, options = {}) {
+    this.resolveService = resolveService;
+    this.resolveSession = resolveSession;
+    this.logger = logger2;
+    this.timeoutMs = options.timeoutMs ?? DECK_PANEL_READ_TIMEOUT_MS;
+    this.probeTimeoutMs = options.probeTimeoutMs ?? DECK_PANEL_READ_PROBE_TIMEOUT_MS;
+    this.maxReplyBytes = options.maxReplyBytes ?? DECK_PANEL_READ_MAX_REPLY_BYTES;
+  }
+  timeoutMs;
+  probeTimeoutMs;
+  maxReplyBytes;
+  /**
+   * True only while the deck answers exactly `{ available: true }`. It is asked on every call: a deck
+   * that appears after start-up becomes visible, and one that goes away or fails stops being announced.
+   * A missing service, `{ available: false }`, a throw and a slow answer all mean "not announced".
+   */
+  async available() {
+    const outcome = await this.probe();
+    this.logger?.debug("deck panel read availability", { outcome });
+    return outcome === "available";
+  }
+  async probe() {
+    const service = this.service();
+    if (service === void 0) return "service-missing";
+    let answer;
+    try {
+      answer = await withTimeout(Promise.resolve().then(() => service.available()), this.probeTimeoutMs);
+    } catch {
+      return "probe-failed";
+    }
+    if (answer === TIMED_OUT) return "probe-timeout";
+    if (!isRecord26(answer)) return "probe-bad-answer";
+    if (answer.available === true) return "available";
+    const reason = answer.reason;
+    return answer.available === false && typeof reason === "string" && SAFE_DECK_KIND.test(reason) ? `unavailable:${reason}` : "unavailable";
+  }
+  async call(input4) {
+    const operation = requestedOperation(input4);
+    if (operation === void 0) return this.fail("operation-not-allowed");
+    const parsed = deckPanelReadParamsSchema.safeParse(input4);
+    if (!parsed.success) return this.fail("bad-request", operation);
+    const service = this.service();
+    if (service === void 0) return this.fail("unavailable", operation);
+    const controller = new AbortController();
+    const startedAt = performance.now();
+    let outcome;
+    try {
+      outcome = await withTimeout(this.run(service, parsed.data, controller.signal), this.timeoutMs);
+    } finally {
+      controller.abort();
+    }
+    if (outcome === TIMED_OUT) return this.fail("timeout", operation);
+    if ("kind" in outcome) return this.fail(outcome.kind, operation);
+    if (outcome.reply.ok === false) {
+      this.logger?.warn("deck panel read refused by deck", { operation, kind: outcome.reply.error.kind });
+    } else {
+      this.logger?.debug("deck panel read ok", { operation, durationMs: Math.round(performance.now() - startedAt) });
+    }
+    return outcome.reply;
+  }
+  async run(service, request2, signal) {
+    try {
+      const workspace2 = await this.resolveSession(request2.sessionId.trim(), signal);
+      if (typeof workspace2 !== "string" || workspace2 === "") return { kind: "session" };
+    } catch {
+      return { kind: "session" };
+    }
+    const params = request2.operation === "tree" ? { sessionId: request2.sessionId } : { sessionId: request2.sessionId, key: request2.key };
+    let reply;
+    try {
+      reply = await service.call(request2.operation, params);
+    } catch {
+      return { kind: "read-failed" };
+    }
+    return this.check(reply, request2.sessionId);
+  }
+  service() {
+    let service;
+    try {
+      service = this.resolveService();
+    } catch {
+      return void 0;
+    }
+    if (!isRecord26(service) || service.feature !== DECK_PANEL_READ_CAPABILITY) return void 0;
+    if (typeof service.available !== "function" || typeof service.call !== "function") return void 0;
+    return service;
+  }
+  /** Accept only a reply the Host can vouch for: plain JSON, within the byte bound, for the requested session. */
+  check(reply, sessionId) {
+    let text;
+    try {
+      text = JSON.stringify(reply);
+    } catch {
+      text = void 0;
+    }
+    if (typeof text !== "string") return { kind: "bad-reply" };
+    if (Buffer.byteLength(text, "utf8") > this.maxReplyBytes) return { kind: "oversized" };
+    const copy = JSON.parse(text);
+    if (!isRecord26(copy)) return { kind: "bad-reply" };
+    if (copy.ok === false) return { reply: deckFailure(copy) };
+    if (copy.ok !== true || copy.sessionId !== sessionId.trim()) return { kind: "bad-reply" };
+    return { reply: copy };
+  }
+  fail(kind, operation) {
+    this.logger?.warn("deck panel read failed", { ...operation === void 0 ? {} : { operation }, kind });
+    return { ok: false, error: { kind, message: HOST_FAILURE_MESSAGES[kind] } };
+  }
+};
+function requestedOperation(input4) {
+  if (!isRecord26(input4)) return void 0;
+  const operation = input4.operation;
+  return DECK_PANEL_READ_OPERATIONS.includes(operation) ? operation : void 0;
+}
+function deckFailure(reply) {
+  const error62 = isRecord26(reply.error) ? reply.error : {};
+  const kind = typeof error62.kind === "string" && SAFE_DECK_KIND.test(error62.kind) ? error62.kind : "read-failed";
+  const message = typeof error62.message === "string" && SAFE_DECK_MESSAGE.test(error62.message) ? error62.message : `The deck read failed (${kind}).`;
+  return { ok: false, error: { kind, message } };
+}
+function isRecord26(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+async function withTimeout(work, ms) {
+  let timer2;
+  const giveUp = new Promise((resolve11) => {
+    timer2 = setTimeout(() => resolve11(TIMED_OUT), ms);
+  });
+  try {
+    return await Promise.race([work, giveUp]);
+  } finally {
+    if (timer2 !== void 0) clearTimeout(timer2);
+  }
+}
+
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID18 } from "node:crypto";
 import { constants as constants7 } from "node:fs";
@@ -111372,7 +111660,7 @@ var WorkspaceUploadHost = class {
   closed = false;
   call(method, input4) {
     return this.serialize(async () => {
-      if (this.closed) throw failure4("UPLOAD_CLOSED");
+      if (this.closed) throw failure5("UPLOAD_CLOSED");
       await this.expire();
       try {
         switch (method) {
@@ -111387,19 +111675,19 @@ var WorkspaceUploadHost = class {
           case "workspace.upload.abort": {
             const p = scope2.parse(input4);
             const upload = this.uploads.get(p.uploadId);
-            if (upload && upload.sessionId !== p.sessionId) throw failure4("UPLOAD_NOT_FOUND");
+            if (upload && upload.sessionId !== p.sessionId) throw failure5("UPLOAD_NOT_FOUND");
             if (upload) await this.discard(p.uploadId, upload);
             return { aborted: true };
           }
           default:
-            throw failure4("METHOD_NOT_FOUND");
+            throw failure5("METHOD_NOT_FOUND");
         }
       } catch (error62) {
         const p = scope2.safeParse(input4 && typeof input4 === "object" ? { sessionId: input4.sessionId, uploadId: input4.uploadId } : input4);
         const upload = p.success ? this.uploads.get(p.data.uploadId) : void 0;
         if (p.success && upload?.sessionId === p.data.sessionId) await this.discard(p.data.uploadId, upload);
         if (error62 instanceof external_exports.ZodError || error62 instanceof RpcError) throw error62;
-        throw failure4("UPLOAD_FAILED");
+        throw failure5("UPLOAD_FAILED");
       }
     });
   }
@@ -111419,16 +111707,16 @@ var WorkspaceUploadHost = class {
   }
   async begin(input4) {
     const p = openParams.parse(input4);
-    if (p.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure4("UPLOAD_LIMIT");
-    if (!validName(p.name)) throw failure4("UPLOAD_INVALID_NAME");
-    if (this.uploads.has(p.uploadId) || this.completed.has(p.uploadId)) throw failure4("UPLOAD_ID_IN_USE");
-    if (this.uploads.size >= 2) throw failure4("UPLOAD_LIMIT");
+    if (p.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure5("UPLOAD_LIMIT");
+    if (!validName(p.name)) throw failure5("UPLOAD_INVALID_NAME");
+    if (this.uploads.has(p.uploadId) || this.completed.has(p.uploadId)) throw failure5("UPLOAD_ID_IN_USE");
+    if (this.uploads.size >= 2) throw failure5("UPLOAD_LIMIT");
     const sourceRoot = await this.sessionRoot(p.sessionId);
     this.assertLive();
-    if (!sourceRoot || !isAbsolute9(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
+    if (!sourceRoot || !isAbsolute9(sourceRoot)) throw failure5("UPLOAD_WORKSPACE_UNAVAILABLE");
     const root2 = await realpath7(sourceRoot);
     const directory = await stat9(root2);
-    if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
+    if (!directory.isDirectory()) throw failure5("UPLOAD_WORKSPACE_UNAVAILABLE");
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
     const temp = join18(root2, `.dsh-upload-${randomUUID18()}.part`);
     let handle;
@@ -111462,16 +111750,16 @@ var WorkspaceUploadHost = class {
   async append(input4, binary = false) {
     const p = binary ? binaryChunkParams.parse(input4) : chunkParams.parse(input4);
     const upload = this.requireUpload(p);
-    if (binary !== (upload.encoding === "binary-v1")) throw failure4("UPLOAD_INVALID_CHUNK");
+    if (binary !== (upload.encoding === "binary-v1")) throw failure5("UPLOAD_INVALID_CHUNK");
     const data2 = decodeChunk(p.data);
-    if (p.offset !== upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
-    if (data2.length > upload.totalBytes - upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
+    if (p.offset !== upload.received) throw failure5("UPLOAD_INVALID_CHUNK");
+    if (data2.length > upload.totalBytes - upload.received) throw failure5("UPLOAD_INVALID_CHUNK");
     await this.validateRoot(upload, this.authorityExpired(upload));
     await upload.reservation.checkDisk();
     let written = 0;
     while (written < data2.length) {
       const result = await upload.handle.write(data2, written, data2.length - written, upload.received + written);
-      if (!result.bytesWritten) throw failure4("UPLOAD_FAILED");
+      if (!result.bytesWritten) throw failure5("UPLOAD_FAILED");
       written += result.bytesWritten;
     }
     this.assertLive();
@@ -111484,16 +111772,16 @@ var WorkspaceUploadHost = class {
     const p = scope2.parse(input4);
     const prior = this.completed.get(p.uploadId);
     if (prior) {
-      if (prior.sessionId !== p.sessionId) throw failure4("UPLOAD_NOT_FOUND");
+      if (prior.sessionId !== p.sessionId) throw failure5("UPLOAD_NOT_FOUND");
       return prior.result;
     }
     const upload = this.requireUpload(p);
-    if (upload.received !== upload.totalBytes) throw failure4("UPLOAD_INCOMPLETE");
+    if (upload.received !== upload.totalBytes) throw failure5("UPLOAD_INCOMPLETE");
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
     const temp = await lstat6(upload.temp);
-    if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+    if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure5("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
     for (let suffix = 0; suffix < 1e4; suffix++) {
@@ -111512,15 +111800,15 @@ var WorkspaceUploadHost = class {
       await this.discard(p.uploadId, upload);
       return result;
     }
-    throw failure4("UPLOAD_NAME_CONFLICT");
+    throw failure5("UPLOAD_NAME_CONFLICT");
   }
   requireUpload(p) {
     const upload = this.uploads.get(p.uploadId);
-    if (!upload || upload.sessionId !== p.sessionId) throw failure4("UPLOAD_NOT_FOUND");
+    if (!upload || upload.sessionId !== p.sessionId) throw failure5("UPLOAD_NOT_FOUND");
     return upload;
   }
   assertLive() {
-    if (this.closed) throw failure4("UPLOAD_CLOSED");
+    if (this.closed) throw failure5("UPLOAD_CLOSED");
   }
   async sessionRoot(sessionId) {
     const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(15e3)]);
@@ -111530,7 +111818,7 @@ var WorkspaceUploadHost = class {
       return await Promise.race([
         this.resolveRoot(sessionId, signal),
         new Promise((_, reject) => {
-          onAbort = () => reject(failure4(this.closed ? "UPLOAD_CLOSED" : "UPLOAD_TIMEOUT"));
+          onAbort = () => reject(failure5(this.closed ? "UPLOAD_CLOSED" : "UPLOAD_TIMEOUT"));
           signal.addEventListener("abort", onAbort, { once: true });
           if (signal.aborted) onAbort();
         })
@@ -111548,17 +111836,17 @@ var WorkspaceUploadHost = class {
     return this.now() - upload.authorityCheckedAt >= WORKSPACE_UPLOAD_AUTHORITY_TTL_MS || upload.received - upload.authorityBytes >= WORKSPACE_UPLOAD_AUTHORITY_BYTES;
   }
   async validateRoot(upload, recheckAuthority = true) {
-    if (upload.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure4("UPLOAD_LIMIT");
+    if (upload.totalBytes > workspaceUploadMaxBytes(this.transportMode(), this.memberRelayUpload())) throw failure5("UPLOAD_LIMIT");
     if (recheckAuthority) {
       const current = await this.sessionRoot(upload.sessionId);
       this.assertLive();
-      if (current !== upload.sourceRoot || await realpath7(current) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+      if (current !== upload.sourceRoot || await realpath7(current) !== upload.root) throw failure5("UPLOAD_WORKSPACE_CHANGED");
       upload.authorityCheckedAt = this.now();
       upload.authorityBytes = upload.received;
     }
-    if (await realpath7(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+    if (await realpath7(upload.root) !== upload.root) throw failure5("UPLOAD_WORKSPACE_CHANGED");
     const directory = await stat9(upload.root);
-    if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+    if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure5("UPLOAD_WORKSPACE_CHANGED");
   }
   async discard(id7, upload) {
     this.uploads.delete(id7);
@@ -111578,14 +111866,14 @@ var WorkspaceUploadHost = class {
     for (const [id7, entry] of this.completed) if (entry.touched <= cutoff) this.completed.delete(id7);
   }
 };
-function failure4(code) {
+function failure5(code) {
   return new RpcError(code, "The workspace upload could not be completed.");
 }
 function decodeChunk(value) {
   const data2 = typeof value === "string" ? Buffer.from(value, "base64") : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
   const limit = typeof value === "string" ? WORKSPACE_UPLOAD_CHUNK : BINARY_UPLOAD_CHUNK_BYTES;
-  if (data2.length === 0 || data2.length > limit) throw failure4("UPLOAD_INVALID_CHUNK");
-  if (typeof value === "string" && data2.toString("base64") !== value) throw failure4("UPLOAD_INVALID_CHUNK");
+  if (data2.length === 0 || data2.length > limit) throw failure5("UPLOAD_INVALID_CHUNK");
+  if (typeof value === "string" && data2.toString("base64") !== value) throw failure5("UPLOAD_INVALID_CHUNK");
   return data2;
 }
 function validName(name2) {
@@ -111820,9 +112108,9 @@ function diagnosticReason2(error62) {
   return message.replace(/\s+/g, " ").slice(0, 160) || "Unknown peer connection failure.";
 }
 function extractEndpoint(message) {
-  if (!isRecord26(message) || !isRecord26(message.payload)) return void 0;
+  if (!isRecord27(message) || !isRecord27(message.payload)) return void 0;
   const payload = message.payload;
-  if (isRecord26(payload.params)) {
+  if (isRecord27(payload.params)) {
     if (typeof payload.params.endpoint === "string") return payload.params.endpoint;
     if (typeof payload.params.method === "string") return payload.params.method;
   }
@@ -111830,7 +112118,7 @@ function extractEndpoint(message) {
   if (typeof payload.method === "string") return payload.method;
   return void 0;
 }
-function isRecord26(value) {
+function isRecord27(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function shortId2(value) {
@@ -112053,10 +112341,7 @@ var TransportUpgradeHost = class {
   }
 };
 
-// packages/plugin/src/rpc-router.ts
-var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
-var emptyParamsSchema = external_exports.object({}).strict();
-var historyConfigureSchema = external_exports.object({ compact: external_exports.boolean() }).strict();
+// packages/plugin/src/rpc-compaction.ts
 var compactionSessionSchema = external_exports.string().min(1).max(128);
 var compactionSubmitSchema = external_exports.object({
   sessionId: compactionSessionSchema,
@@ -112067,10 +112352,30 @@ var compactionOperationSchema = external_exports.object({
   sessionId: compactionSessionSchema,
   operationId: external_exports.string().uuid()
 }).strict();
+function dispatchCompactionRpc(method, params, route) {
+  if (route === void 0) {
+    throw new RpcError("FEATURE_NOT_SUPPORTED", "This Host does not provide asynchronous Remote compaction.");
+  }
+  switch (method) {
+    case "harness.remote.compaction.submit":
+      return route.operations.submit(compactionSubmitSchema.parse(params), route.owner);
+    case "harness.remote.compaction.status":
+      return route.operations.status(compactionOperationSchema.parse(params), route.owner);
+    case "harness.remote.compaction.cancel":
+      return route.operations.cancel(compactionOperationSchema.parse(params), route.owner);
+  }
+}
+
+// packages/plugin/src/rpc-router.ts
+var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
+var emptyParamsSchema = external_exports.object({}).strict();
+var historyConfigureSchema = external_exports.object({ compact: external_exports.boolean() }).strict();
 var apiMethods = /* @__PURE__ */ new Set([
   ...sessionTransferMethods,
   ...attentionRpcMethods,
   ...WORKSPACE_GIT_METHODS,
+  ...DECK_PANEL_READ_METHODS,
+  ...DECK_PANEL_COMMENTS_METHODS,
   "harness.transport.describe",
   "dsh.web.open",
   "dsh.web.close",
@@ -112132,7 +112437,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints, workspaceGit, attention) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints, workspaceGit, attention, deckPanelRead, deckPanelComments) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -112153,6 +112458,8 @@ var RpcRouter = class {
     this.sameLinkIpv6Endpoints = sameLinkIpv6Endpoints;
     this.workspaceGit = workspaceGit;
     this.attention = attention;
+    this.deckPanelRead = deckPanelRead;
+    this.deckPanelComments = deckPanelComments;
   }
   active = 0;
   async closePeerStreams() {
@@ -112231,6 +112538,9 @@ var RpcRouter = class {
         const { sameLinkIpv6Pair } = external_exports.object({ sameLinkIpv6Pair: sameLinkIpv6PairSchema.optional() }).strict().parse(params);
         const hostCapabilities = (await this.capabilities()).filter((capability) => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY);
         const remoteAvailable = hostCapabilities.includes("harness.remote.v1") || hostCapabilities.includes("harness.remote.v3");
+        const deckCommentsProbe = this.deckPanelComments?.available();
+        const deckReadAvailable = await this.deckPanelRead?.available();
+        const deckCommentsAvailable = deckCommentsProbe !== void 0 && await deckCommentsProbe;
         const capabilities = [.../* @__PURE__ */ new Set([
           ...hostCapabilities,
           "remote.history.compact.v1",
@@ -112238,6 +112548,9 @@ var RpcRouter = class {
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
           ...this.workspaceGit === void 0 ? [] : [WORKSPACE_GIT_CAPABILITY],
+          // Asked on every negotiation, never cached: the deck publishes its service after start-up and can go away.
+          ...deckReadAvailable === true ? [DECK_PANEL_READ_CAPABILITY] : [],
+          ...deckCommentsAvailable === true ? [DECK_PANEL_COMMENTS_CAPABILITY] : [],
           ...this.sessionTransfer?.capabilities() ?? [],
           ...this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : [],
           ...this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === "linux" ? [DSH_WEB_LAN_IPV6_CAPABILITY] : [],
@@ -112270,18 +112583,10 @@ var RpcRouter = class {
         }
         return { compact };
       }
-      case "harness.remote.compaction.submit": {
-        const route = this.requireCompaction();
-        return route.operations.submit(compactionSubmitSchema.parse(params), route.owner);
-      }
-      case "harness.remote.compaction.status": {
-        const route = this.requireCompaction();
-        return route.operations.status(compactionOperationSchema.parse(params), route.owner);
-      }
-      case "harness.remote.compaction.cancel": {
-        const route = this.requireCompaction();
-        return route.operations.cancel(compactionOperationSchema.parse(params), route.owner);
-      }
+      case "harness.remote.compaction.submit":
+      case "harness.remote.compaction.status":
+      case "harness.remote.compaction.cancel":
+        return dispatchCompactionRpc(method, params, this.compaction);
       case "harness.remote.call":
         return this.requireRemoteGateway().call(params);
       case "harness.remote.transfer.open":
@@ -112364,6 +112669,14 @@ var RpcRouter = class {
         if (!this.workspaceGit) throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace Git is unavailable on this Host.");
         return this.workspaceGit.diff(params);
       }
+      case "deck.panel.comments": {
+        if (!this.deckPanelComments) throw new RpcError("FEATURE_NOT_SUPPORTED", "Deck comments are unavailable on this Host.");
+        return this.deckPanelComments.list(params);
+      }
+      case "deck.panel.read": {
+        if (!this.deckPanelRead) throw new RpcError("FEATURE_NOT_SUPPORTED", "Deck panel read is unavailable on this Host.");
+        return this.deckPanelRead.call(params);
+      }
       case "plugin.route.call":
         return this.requirePluginRoute().call(params);
       case "remote.transport.upgrade.offer":
@@ -112401,12 +112714,6 @@ var RpcRouter = class {
         }
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
-  }
-  requireCompaction() {
-    if (this.compaction === void 0) {
-      throw new RpcError("FEATURE_NOT_SUPPORTED", "This Host does not provide asynchronous Remote compaction.");
-    }
-    return this.compaction;
   }
   requireRemoteGateway() {
     if (this.harnessRemote === void 0) {
@@ -114686,7 +114993,7 @@ var HarnessRemoteBridge = class {
       if (params.endpoint === "$events/result" && nativeResult.ok && this.forwardedEventsObserver?.onEventResult !== void 0) {
         const args = requestArgs(params.payload);
         const eventId = typeof args.eventId === "string" && args.eventId.length > 0 ? args.eventId : void 0;
-        const outcomeKind = isRecord27(args.outcome) && typeof args.outcome.kind === "string" ? args.outcome.kind : void 0;
+        const outcomeKind = isRecord28(args.outcome) && typeof args.outcome.kind === "string" ? args.outcome.kind : void 0;
         if (eventId !== void 0) {
           try {
             this.forwardedEventsObserver.onEventResult(eventId, outcomeKind);
@@ -114694,12 +115001,12 @@ var HarnessRemoteBridge = class {
           }
         }
       }
-      if (params.endpoint === "dsBot/call" && nativeResult.ok && isRecord27(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
+      if (params.endpoint === "dsBot/call" && nativeResult.ok && isRecord28(nativeResult.value) && this.forwardedEventsObserver?.onDsBotCall !== void 0) {
         const root2 = record11(params.payload);
-        const args = isRecord27(root2.args) ? root2.args : root2;
+        const args = isRecord28(root2.args) ? root2.args : root2;
         const botEndpoint = typeof args.endpoint === "string" && args.endpoint.length > 0 ? args.endpoint : void 0;
         if (botEndpoint !== void 0) {
-          const botPayload = isRecord27(args.payload) ? args.payload : null;
+          const botPayload = isRecord28(args.payload) ? args.payload : null;
           try {
             this.forwardedEventsObserver.onDsBotCall({ endpoint: botEndpoint, payload: botPayload }, nativeResult.value);
           } catch {
@@ -114806,7 +115113,7 @@ var HarnessRemoteBridge = class {
       const record12 = await this.schedule.create(sessionId, request2, AbortSignal.timeout(6e4));
       return { ok: true, value: record12 };
     } catch (error62) {
-      const published = isRecord27(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
+      const published = isRecord28(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
       if (published === void 0) {
         return {
           ok: false,
@@ -115045,8 +115352,8 @@ var HarnessRemoteBridge = class {
     const args = parsed.data.args;
     const result = await this.gateway.dispatch(plugin ? "pluginManager/listPlugins" : "pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord27(value) && value[plugin ? "entryId" : "name"] === args[key]);
-    if (!isRecord27(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
+    const row = result.value.find((value) => isRecord28(value) && value[plugin ? "entryId" : "name"] === args[key]);
+    if (!isRecord28(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
     if (remoteOwnedBundleRow(row, plugin)) {
       throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
     }
@@ -115066,8 +115373,8 @@ var HarnessRemoteBridge = class {
     if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin update request.");
     const result = await this.gateway.dispatch("pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord27(value) && value.name === parsed.data.args.name);
-    if (!isRecord27(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
+    const row = result.value.find((value) => isRecord28(value) && value.name === parsed.data.args.name);
+    if (!isRecord28(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
       throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be updated remotely.");
     }
     if (remoteOwnedBundleRow(row, false)) {
@@ -115084,7 +115391,7 @@ var HarnessRemoteBridge = class {
   }
   async pump(streamId, source, signal, historyFollow = false, transferFrames = false, forwardedEvents = false, sessionId) {
     let reason = "completed";
-    let failure5;
+    let failure6;
     let closedNotified = false;
     const notifyClosed = () => {
       if (!forwardedEvents || closedNotified) return;
@@ -115127,7 +115434,7 @@ var HarnessRemoteBridge = class {
       if (signal.aborted) reason = "cancelled";
     } catch (error62) {
       reason = signal.aborted ? "cancelled" : "failed";
-      if (!signal.aborted) failure5 = this.gateway.failure(error62);
+      if (!signal.aborted) failure6 = this.gateway.failure(error62);
     } finally {
       if (forwardedEvents) {
         signal.removeEventListener("abort", notifyClosed);
@@ -115137,7 +115444,7 @@ var HarnessRemoteBridge = class {
       await this.publish("harness.remote.stream.closed", {
         streamId,
         reason,
-        ...failure5 === void 0 ? {} : { failure: failure5 }
+        ...failure6 === void 0 ? {} : { failure: failure6 }
       }).catch(() => void 0);
     }
   }
@@ -115186,7 +115493,7 @@ var HarnessRemoteBridge = class {
   }
   async resolveMessageFilePayload(payload, endpoint, signal) {
     const deny = () => workspaceFileFailure("WORKSPACE_PATH_DENIED", "The message attachment is unavailable.", "outside-root");
-    if (!isRecord27(payload) || !isRecord27(payload.args)) throw deny();
+    if (!isRecord28(payload) || !isRecord28(payload.args)) throw deny();
     const args = payload.args;
     const sessionId = args.workspaceFileScopeId;
     if (typeof sessionId !== "string" || !isMessageFilePath(args.path)) throw deny();
@@ -115212,9 +115519,9 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
     }
     if (endpoint === "workspaceFiles/readBytes") {
-      const options = isRecord27(args.options) ? args.options : {};
+      const options = isRecord28(args.options) ? args.options : {};
       if ("baseFile" in args || "baseFile" in options) throw deny();
-      if (!isRecord27(options.range) && !isRecord27(args.range)) {
+      if (!isRecord28(options.range) && !isRecord28(args.range)) {
         if (reference.bytes > MAX_READ_BYTES2) {
           throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
         }
@@ -115228,7 +115535,7 @@ var HarnessRemoteBridge = class {
     return { ...payload, args: { ...args, path } };
   }
   async assertNativeWorkspaceFileCall(endpoint, payload, signal) {
-    const rootPayload = isRecord27(payload) ? payload : {};
+    const rootPayload = isRecord28(payload) ? payload : {};
     const args = requestArgs(payload);
     const sessionId = typeof args.workspaceFileScopeId === "string" ? args.workspaceFileScopeId : typeof args.sessionId === "string" ? args.sessionId : typeof args.agentId === "string" ? args.agentId : void 0;
     if (sessionId === void 0) {
@@ -115238,7 +115545,7 @@ var HarnessRemoteBridge = class {
     if (!sessionWorkspace) {
       throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
-    const options = isRecord27(args.options) ? args.options : void 0;
+    const options = isRecord28(args.options) ? args.options : void 0;
     const rawBaseFile = endpoint === "workspaceFiles/readBytes" ? typeof options?.baseFile === "string" ? options.baseFile : typeof args.baseFile === "string" ? args.baseFile : void 0 : void 0;
     if (endpoint === "workspaceFiles/readBytes") {
       if (options !== void 0 && "baseFile" in options && options.baseFile !== void 0 && typeof options.baseFile !== "string") {
@@ -115272,8 +115579,8 @@ var HarnessRemoteBridge = class {
       }
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd);
     }
-    let finalArgs = isRecord27(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
-    if (isRecord27(finalArgs.options)) {
+    let finalArgs = isRecord28(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
+    if (isRecord28(finalArgs.options)) {
       const { baseFile: _baseFile, ...restOptions } = finalArgs.options;
       finalArgs.options = restOptions;
     }
@@ -115285,11 +115592,11 @@ var HarnessRemoteBridge = class {
       const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
       const normalizedRange = { offset: offset2, length: boundedLength };
       if (requiresWorkspaceChangePath(this.harnessVersion)) {
-        finalArgs.options = { ...isRecord27(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
+        finalArgs.options = { ...isRecord28(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
         delete finalArgs.range;
       } else {
         finalArgs.range = normalizedRange;
-        if (isRecord27(finalArgs.options)) {
+        if (isRecord28(finalArgs.options)) {
           finalArgs.options = { ...finalArgs.options, range: normalizedRange };
         }
       }
@@ -115298,7 +115605,7 @@ var HarnessRemoteBridge = class {
         finalArgs.length = boundedLength;
       }
     }
-    return isRecord27(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
+    return isRecord28(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
   }
   async resolveWorkspaceRootForSession(sessionId, signal) {
     signal.throwIfAborted();
@@ -115402,7 +115709,7 @@ var HarnessRemoteBridge = class {
 };
 function journalSessionId(payload) {
   const address2 = requestArgs(payload).address;
-  return isRecord27(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
+  return isRecord28(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
 }
 function isPathOutside2(rel) {
   if (rel === ".." || isAbsolute11(rel)) return true;
@@ -115412,17 +115719,17 @@ function isPathOutside2(rel) {
   return rel.startsWith("../");
 }
 function byteOrLineRange2(args) {
-  const options = isRecord27(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord27(options.range)) return options.range;
-  return isRecord27(args.range) ? args.range : args;
+  const options = isRecord28(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord28(options.range)) return options.range;
+  return isRecord28(args.range) ? args.range : args;
 }
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord27(payload) || !isRecord27(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord28(payload) || !isRecord28(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord27(payload) || !isRecord27(payload.args)) return payload;
+  if (!isRecord28(payload) || !isRecord28(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -115436,10 +115743,10 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   return payload;
 }
 async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
-  if (endpoint !== "session/attachment" || !isRecord27(payload) || !isRecord27(payload.args)) return payload;
-  const request2 = isRecord27(payload.args.request) ? payload.args.request : void 0;
+  if (endpoint !== "session/attachment" || !isRecord28(payload) || !isRecord28(payload.args)) return payload;
+  const request2 = isRecord28(payload.args.request) ? payload.args.request : void 0;
   if (request2 === void 0) return payload;
-  const attachment = isRecord27(request2.attachment) ? request2.attachment : void 0;
+  const attachment = isRecord28(request2.attachment) ? request2.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request2.attachmentId === "string" ? request2.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
   if (!isDshV022OrNewer(harnessVersion)) {
@@ -115471,7 +115778,7 @@ async function findSessionAttachmentReference(gateway, sessionId, attachmentId, 
       const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
       const reference = extractAttachmentReference(result, attachmentId);
       if (reference !== void 0) return reference;
-      if (result.ok === true && isRecord27(result.value)) {
+      if (result.ok === true && isRecord28(result.value)) {
         if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
           beforeSeq = result.value.beforeSeq;
           continue;
@@ -115495,7 +115802,7 @@ function extractAttachmentReference(result, attachmentId) {
   const value = result.value;
   let records;
   if (Array.isArray(value)) records = value;
-  else if (isRecord27(value)) {
+  else if (isRecord28(value)) {
     if (Array.isArray(value.records)) records = value.records;
     else if (Array.isArray(value.events)) records = value.events;
   }
@@ -115516,7 +115823,7 @@ function findImageReference(value, attachmentId, depth) {
     return void 0;
   }
   const block = value;
-  const candidate = isRecord27(block.attachment) ? block.attachment : block;
+  const candidate = isRecord28(block.attachment) ? block.attachment : block;
   const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
   if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
     return {
@@ -115666,7 +115973,7 @@ var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constru
 var MAX_WHITELIST_PROJECTION_BYTES = 64 * 1024;
 var MAX_UNKNOWN_PROJECTION_BYTES = 4096;
 function filterSessionProjections(session2) {
-  if (!isRecord27(session2) || !isRecord27(session2.projections) || !isRecord27(session2.projections.values)) {
+  if (!isRecord28(session2) || !isRecord28(session2.projections) || !isRecord28(session2.projections.values)) {
     return session2;
   }
   const originalValues = session2.projections.values;
@@ -115707,15 +116014,15 @@ function trimSessionCatalogRows(endpoint, items) {
   return kept.length <= SESSION_LIST_ROW_BUDGET ? kept : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET);
 }
 function isListableRemoteSession(session2) {
-  return isRecord27(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
+  return isRecord28(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
 }
 function updatedAtOf(session2) {
-  return isRecord27(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
+  return isRecord28(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
 }
 function withSessionRowTitle(session2) {
-  if (!isRecord27(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
-  const values = isRecord27(session2.projections) ? session2.projections.values : void 0;
-  const title = isRecord27(values) ? values.title : void 0;
+  if (!isRecord28(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
+  const values = isRecord28(session2.projections) ? session2.projections.values : void 0;
+  const title = isRecord28(values) ? values.title : void 0;
   return typeof title === "string" && title !== "" ? { ...session2, title } : session2;
 }
 function filterSessionListProjections(resultOrEndpoint, maybeResult) {
@@ -115724,7 +116031,7 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
   if (endpoint !== void 0 && endpoint !== "session/list" && endpoint !== "session/search") return result;
   if (!result || !result.ok) return result;
   const filterList = (items) => trimSessionCatalogRows(endpoint, items).map(filterSessionProjections).map(withSessionRowTitle);
-  if (isRecord27(result.value)) {
+  if (isRecord28(result.value)) {
     let changed = false;
     const updated = { ...result.value };
     if (Array.isArray(result.value.items)) {
@@ -115748,27 +116055,27 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
 function filterRemotePluginInventory(endpoint, result) {
   if (!result.ok) return result;
   const isRemote = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-  const filterEntries = (entries) => entries.filter((entry) => !isRecord27(entry) || !isRemote(entry.moduleName));
+  const filterEntries = (entries) => entries.filter((entry) => !isRecord28(entry) || !isRemote(entry.moduleName));
   if (endpoint === "pluginManager/listPlugins" && Array.isArray(result.value)) {
     return { ...result, value: filterEntries(result.value) };
   }
   if (endpoint === "pluginManager/listBundles" && Array.isArray(result.value)) {
-    return { ...result, value: result.value.filter((bundle) => !isRecord27(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord27(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
+    return { ...result, value: result.value.filter((bundle) => !isRecord28(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord28(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
   }
-  if (endpoint === "pluginInventory/list" && isRecord27(result.value) && Array.isArray(result.value.entries)) {
+  if (endpoint === "pluginInventory/list" && isRecord28(result.value) && Array.isArray(result.value.entries)) {
     return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } };
   }
   return result;
 }
 function requestArgs(payload) {
   const root2 = record11(payload);
-  const args = isRecord27(root2.args) ? root2.args : root2;
+  const args = isRecord28(root2.args) ? root2.args : root2;
   return record11(args.request ?? args._request ?? args);
 }
 function record11(value) {
-  return isRecord27(value) ? value : {};
+  return isRecord28(value) ? value : {};
 }
-function isRecord27(value) {
+function isRecord28(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isCompactSnapshot(value) {
@@ -115777,7 +116084,7 @@ function isCompactSnapshot(value) {
 function remoteOwnedBundleRow(row, plugin) {
   const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
   if (remoteModule(plugin ? row.moduleName : row.name)) return true;
-  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord27(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
+  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord28(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
@@ -115796,11 +116103,11 @@ var MAX_CAUSE_DEPTH = 8;
 function requestIndexKey(ownerDeviceId, sessionId, requestId2) {
   return `${ownerDeviceId}\0${sessionId}\0${requestId2}`;
 }
-function isRecord28(value) {
+function isRecord29(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function commandIdOf(result) {
-  if (result?.ok !== true || !isRecord28(result.value)) return void 0;
+  if (result?.ok !== true || !isRecord29(result.value)) return void 0;
   return typeof result.value.commandId === "string" ? result.value.commandId : void 0;
 }
 var RemoteCompactionOperations = class {
@@ -116028,13 +116335,13 @@ var RemoteCompactionOperations = class {
         );
         return;
       }
-      const deadline = this.cancellingDeadlineOf(operation);
-      if (this.now() >= deadline) {
+      const deadline2 = this.cancellingDeadlineOf(operation);
+      if (this.now() >= deadline2) {
         operation.confirmation = "unknown";
         this.settle(operation, "unconfirmed", this.cancellingGraceExpiredMessage(operation));
         return;
       }
-      this.scheduleCancellingGrace(operation, deadline);
+      this.scheduleCancellingGrace(operation, deadline2);
       operation.confirmation = "unknown";
       operation.state = "cancelling";
       operation.message = operation.cancelled ? "Cancellation was requested; the Host is still waiting for the compaction to finish." : "The compaction budget expired; the Host is still waiting for the compaction to finish.";
@@ -116045,13 +116352,13 @@ var RemoteCompactionOperations = class {
     if (operation.cancellingDeadlineAt !== void 0) return operation.cancellingDeadlineAt;
     const settledAt = operation.commandSettledAt ?? this.now();
     const graceMs = Math.min(this.cancellingGraceMs, operation.budgetMs);
-    const deadline = settledAt + graceMs;
-    operation.cancellingDeadlineAt = deadline;
-    return deadline;
+    const deadline2 = settledAt + graceMs;
+    operation.cancellingDeadlineAt = deadline2;
+    return deadline2;
   }
-  scheduleCancellingGrace(operation, deadline) {
+  scheduleCancellingGrace(operation, deadline2) {
     if (operation.graceTimer !== void 0 || operation.finishedAt !== void 0) return;
-    const remainingMs = Math.max(0, deadline - this.now());
+    const remainingMs = Math.max(0, deadline2 - this.now());
     operation.graceTimer = setTimeout(() => {
       operation.graceTimer = void 0;
       void this.reconcile(operation);
@@ -116192,7 +116499,7 @@ function isAbortThrown(thrown, reason) {
       current = "cause" in current ? current.cause : void 0;
       continue;
     }
-    if (isRecord28(current)) {
+    if (isRecord29(current)) {
       if (typeof current.code === "string" && ABORT_CODE_PATTERN.test(current.code)) return true;
       if (typeof current.message === "string" && matchesSignalReason(current.message, reason)) return true;
       current = current.cause;
@@ -116207,13 +116514,13 @@ function matchesSignalReason(message, reason) {
   return reasonMessage !== void 0 && reasonMessage !== "" && message.includes(reasonMessage);
 }
 function isCommandSuccess(result) {
-  if (result.ok !== true || !isRecord28(result.value)) return false;
-  const command = isRecord28(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord29(result.value)) return false;
+  const command = isRecord29(result.value.result) ? result.value.result : void 0;
   return command?.kind === "success";
 }
 function commandText2(result) {
-  if (result.ok !== true || !isRecord28(result.value)) return void 0;
-  const command = isRecord28(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord29(result.value)) return void 0;
+  const command = isRecord29(result.value.result) ? result.value.result : void 0;
   return typeof command?.text === "string" && command.text.trim() !== "" ? command.text : void 0;
 }
 function sanitizeMessage(message) {
@@ -116232,13 +116539,13 @@ function waitWithTimeout(promise2, ms) {
   });
 }
 function readCompactionConfirmation(result, acceptedAt, commandId) {
-  if (result.ok !== true || !isRecord28(result.value)) return { kind: "unknown" };
+  if (result.ok !== true || !isRecord29(result.value)) return { kind: "unknown" };
   const records = Array.isArray(result.value.records) ? result.value.records : [];
   const legacy = Array.isArray(result.value.events) ? result.value.events : [];
   const events = [];
   for (const record12 of [...records, ...legacy]) {
-    const event2 = isRecord28(record12) && isRecord28(record12.event) ? record12.event : record12;
-    if (isRecord28(event2) && typeof event2.type === "string") events.push(event2);
+    const event2 = isRecord29(record12) && isRecord29(record12.event) ? record12.event : record12;
+    if (isRecord29(event2) && typeof event2.type === "string") events.push(event2);
   }
   if (events.length === 0) return { kind: "unknown" };
   const matchedCommandRun = commandId === void 0 ? latestCompactCommandId(events, acceptedAt) : hasCompactCommandRun(events, commandId) ? commandId : void 0;
@@ -116246,34 +116553,34 @@ function readCompactionConfirmation(result, acceptedAt, commandId) {
   if (resolvedCommandId === void 0) return { kind: "not-yet" };
   const end = [...events].reverse().find((event2) => {
     if (event2.type !== "compaction/end") return false;
-    const data3 = isRecord28(event2.data) ? event2.data : void 0;
+    const data3 = isRecord29(event2.data) ? event2.data : void 0;
     return data3?.sourceCommandId === resolvedCommandId;
   });
   if (end === void 0) {
     const hasCompactionStart = events.some((event2) => {
       if (event2.type !== "compaction/start") return false;
-      const data3 = isRecord28(event2.data) ? event2.data : void 0;
+      const data3 = isRecord29(event2.data) ? event2.data : void 0;
       return data3?.sourceCommandId === resolvedCommandId;
     });
     if (hasCompactionStart) return { kind: "not-yet", started: true };
     if (matchedCommandRun !== void 0) return { kind: "not-yet", commandRecorded: true };
     return { kind: "not-yet" };
   }
-  const data2 = isRecord28(end.data) ? end.data : {};
+  const data2 = isRecord29(end.data) ? end.data : {};
   const error62 = data2.error === void 0 ? void 0 : errorText(data2.error);
   return error62 === void 0 ? { kind: "finished" } : { kind: "finished", error: error62 };
 }
 function hasCompactCommandRun(events, commandId) {
   return events.some((event2) => {
     if (event2.type !== "command/run") return false;
-    const data2 = isRecord28(event2.data) ? event2.data : void 0;
+    const data2 = isRecord29(event2.data) ? event2.data : void 0;
     return data2?.name === "compact" && data2.commandId === commandId;
   });
 }
 function latestCompactCommandId(events, acceptedAt) {
   for (const event2 of [...events].reverse()) {
     if (event2.type !== "command/run") continue;
-    const data2 = isRecord28(event2.data) ? event2.data : void 0;
+    const data2 = isRecord29(event2.data) ? event2.data : void 0;
     if (data2?.name !== "compact" || typeof data2.commandId !== "string") continue;
     const time3 = typeof event2.time === "number" ? event2.time : 0;
     if (time3 !== 0 && time3 < acceptedAt - 5e3) continue;
@@ -116283,7 +116590,7 @@ function latestCompactCommandId(events, acceptedAt) {
 }
 function errorText(error62) {
   if (typeof error62 === "string") return sanitizeMessage(error62);
-  if (isRecord28(error62)) {
+  if (isRecord29(error62)) {
     const message = error62.message ?? error62.error ?? error62.reason;
     if (typeof message === "string" && message.trim() !== "") return sanitizeMessage(message);
     try {
@@ -116319,7 +116626,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 // packages/plugin/src/service.ts
 var CODEX_STARTUP_GRACE_MS = 1500;
 var HostPluginRuntime = class {
-  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices, resolveDshWeb, codexStartupGraceMs = CODEX_STARTUP_GRACE_MS, attachmentHostPath) {
+  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices, resolveDshWeb, codexStartupGraceMs = CODEX_STARTUP_GRACE_MS, attachmentHostPath, deckPanelRead, deckPanelComments) {
     this.config = config2;
     this.identities = identities;
     this.logger = logger2;
@@ -116329,6 +116636,8 @@ var HostPluginRuntime = class {
     this.pluginRoutes = pluginRoutes;
     this.schedule = schedule;
     this.codexStartupGraceMs = codexStartupGraceMs;
+    this.deckPanelRead = deckPanelRead;
+    this.deckPanelComments = deckPanelComments;
     this.terminalEnabled = config2.terminal.enabled;
     this.loopbackPorts = [...config2.loopback.ports];
     this.attention = new HostAttentionTracker({
@@ -116443,13 +116752,14 @@ var HostPluginRuntime = class {
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
       ), void 0, context.transportMode, Date.now, this.uploadBudget, context.memberRelayUpload);
-      const workspaceGit = new WorkspaceGitHost(resolveSessionWorkspaceRoot(
+      const sessionAuthority = resolveSessionWorkspaceRoot(
         peerGateway,
         () => harnessSessionGeneration(this.harnessVersion) === "v3",
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
         () => workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.", "authority-unavailable")
-      ));
+      );
+      const workspaceGit = new WorkspaceGitHost(sessionAuthority);
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId,
         peerIdentityKey: context.peerIdentityKey,
@@ -116486,7 +116796,9 @@ var HostPluginRuntime = class {
         this.attention.createPeerRoute(
           context.connectionId,
           (event2) => send(createEvent("attention.follow.event", event2))
-        )
+        ),
+        new DeckPanelReadHost(() => this.deckPanelRead?.(), sessionAuthority, this.logger),
+        this.deckPanelComments && new DeckPanelCommentsHost(this.deckPanelComments, sessionAuthority)
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -117562,21 +117874,21 @@ var LocalPluginUpgrade = class {
 };
 function bundleUpdatable(listed, packageName) {
   if (!Array.isArray(listed)) return false;
-  return listed.some((row) => isRecord29(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
+  return listed.some((row) => isRecord30(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
 }
 function classifyUpdateResult(result) {
-  if (!isRecord29(result) || !isRecord29(result.result)) return { status: "failed", message: "update-failed" };
+  if (!isRecord30(result) || !isRecord30(result.result)) return { status: "failed", message: "update-failed" };
   const application = result.result.application;
   if (application === "applied" || application === "restart-required") return { status: "started" };
   return { status: "failed", message: failureMessage(result.result.error) };
 }
 function failureMessage(error62) {
-  if (!isRecord29(error62)) return "update-failed";
+  if (!isRecord30(error62)) return "update-failed";
   const code = typeof error62.code === "string" && error62.code.length > 0 && error62.code.length <= 80 ? error62.code : "update-failed";
   const diagnostic = typeof error62.diagnostic === "string" ? error62.diagnostic.replace(/\s+/g, " ").trim().slice(0, 180) : "";
   return diagnostic === "" ? code : `${code}: ${diagnostic}`;
 }
-function isRecord29(value) {
+function isRecord30(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -117762,9 +118074,9 @@ async function login(args, runtime) {
 
 Waiting for authorization...
 `);
-  const deadline = runtime.now() + session2.expiresIn * 1e3;
+  const deadline2 = runtime.now() + session2.expiresIn * 1e3;
   let identity3 = context.identity;
-  while (runtime.now() < deadline) {
+  while (runtime.now() < deadline2) {
     let result;
     try {
       result = await context.api.pollOAuthQrLogin(identity3, session2.qrId, async () => {
@@ -117773,7 +118085,7 @@ Waiting for authorization...
       });
     } catch (error62) {
       if (!(error62 instanceof ServerApiError) || !error62.retryable) throw error62;
-      await runtime.wait(Math.min(QR_POLL_INTERVAL_MS, Math.max(1, deadline - runtime.now())));
+      await runtime.wait(Math.min(QR_POLL_INTERVAL_MS, Math.max(1, deadline2 - runtime.now())));
       continue;
     }
     if (result.status === "complete") {
@@ -117782,7 +118094,7 @@ Waiting for authorization...
       return 0;
     }
     if (result.status === "expired") break;
-    await runtime.wait(Math.min(QR_POLL_INTERVAL_MS, Math.max(1, deadline - runtime.now())));
+    await runtime.wait(Math.min(QR_POLL_INTERVAL_MS, Math.max(1, deadline2 - runtime.now())));
   }
   write2(runtime.stderr, "The QR login expired. Run the login command again to generate a new code.\n");
   return 1;
@@ -118092,10 +118404,10 @@ function apply(ctx, entry = void 0) {
           true,
           pendingLogStore
         );
-        const failure5 = storageError ?? configError;
-        if (failure5 !== void 0) {
-          pendingLogger.error("Remote plugin startup failed", safeStartupError(failure5));
-          control.setStartupFailure(failure5, { storageAvailable: storageError === void 0 });
+        const failure6 = storageError ?? configError;
+        if (failure6 !== void 0) {
+          pendingLogger.error("Remote plugin startup failed", safeStartupError(failure6));
+          control.setStartupFailure(failure6, { storageAvailable: storageError === void 0 });
         }
         const dispose = mountControlRoute(runtimeContext, control, connection, (error62) => {
           pendingLogger.error("Remote control route registration failed", safeStartupError(error62));
@@ -118141,11 +118453,11 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   ));
   let defaultIdentityDirectory = new IdentityStore().directory;
   let storageAvailable = false;
-  const handleEarlyFailure = async (failure5) => {
-    logger2.error("Remote plugin startup failed", safeStartupError(failure5));
+  const handleEarlyFailure = async (failure6) => {
+    logger2.error("Remote plugin startup failed", safeStartupError(failure6));
     if (connection === void 0) {
       await logStore.flush();
-      throw failure5;
+      throw failure6;
     }
     if (!isFiberActive(ctx)) {
       await logStore.flush();
@@ -118162,7 +118474,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       storageAvailable,
       logStore
     );
-    control.setStartupFailure(failure5, { storageAvailable });
+    control.setStartupFailure(failure6, { storageAvailable });
     mountControlEffect(ctx, control, connection, logStore, logger2, "ds-harness-remote startup failure control");
   };
   let config2;
@@ -118291,7 +118603,11 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         (ref) => {
           const attachments = safeGetService2(ctx, "attachments") ?? safeGetService2(rootContext(ctx), "attachments");
           return attachments?.fileHostPath?.(ref);
-        }
+        },
+        // Optional and late: the deck publishes `deckPanelRead` after start-up, so it is looked up on every
+        // use. A sibling bundle's service may not be visible from this plugin's own context.
+        () => safeGetService2(ctx, "deckPanelRead") ?? safeGetService2(rootContext(ctx), "deckPanelRead"),
+        () => safeGetService2(ctx, "deckPanelComments") ?? safeGetService2(rootContext(ctx), "deckPanelComments")
       );
       let nextClientRuntime;
       if (nextConfig.serverUrl !== void 0 && connection !== void 0) {
@@ -118341,8 +118657,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         if (closed) throw new Error("Remote plugin is closed");
         clientActive = false;
         const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
-        const failure5 = shutdown.find((result) => result.status === "rejected");
-        if (failure5?.status === "rejected") throw failure5.reason;
+        const failure6 = shutdown.find((result) => result.status === "rejected");
+        if (failure6?.status === "rejected") throw failure6.reason;
         if (closed) throw new Error("Remote plugin is closed");
         defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
         controlRuntime?.setIdentityDirectory(defaultIdentityDirectory);
